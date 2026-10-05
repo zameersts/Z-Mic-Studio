@@ -1,0 +1,17 @@
+# ZMic Studio - Windows Companion dependencies
+# Install with:  pip install -r requirements.txt
+
+# --- Required ---
+wxPython>=4.2          # Accessible GUI framework (Win32 native controls)
+numpy>=1.24            # Vector DSP engine
+sounddevice>=0.4       # WASAPI capture / playback via PortAudio
+
+# --- Recommended ---
+scipy>=1.10            # 80Hz rumble-cut filter (signal.butter / sosfilt).
+                        # Without it the low-cut is silently disabled; the rest of the
+                        # spectral denoise still works.
+accessible_output2>=0.3 # Screen-reader speech output for NVDA / JAWS / Narrator.
+                        # Falls back to SAPI via comtypes when absent.
+
+# --- Windows speech fallback ---
+comtypes>=1.2          # SAPI.SpVoice fallback if accessible_output2 is unavailable

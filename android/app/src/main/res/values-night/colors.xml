@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark palette. Every text/background pair here exceeds WCAG AA (>= 4.5:1). -->
+<resources>
+    <color name="primary">#8AB4F8</color>
+    <color name="primary_dark">#AECBFA</color>
+    <color name="accent">#4DB6AC</color>
+    <color name="background">#121212</color>
+    <color name="text_primary">#E8EAED</color>
+    <color name="text_secondary">#B0B3B8</color>
+    <color name="error">#F28B82</color>
+    <color name="success">#81C995</color>
+    <color name="surface">#1E1E1E</color>
+</resources>

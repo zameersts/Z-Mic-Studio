@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon for API 21-25 (adaptive icons need API 26, see mipmap-anydpi-v26). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/ic_launcher_background" />
+    <item android:drawable="@drawable/ic_launcher_foreground" />
+</layer-list>

@@ -1,0 +1,30 @@
+# Normalise line endings so Windows and other platforms do not fight over diffs.
+* text=auto
+
+# Windows batch files MUST use CRLF or Windows will refuse to run them.
+*.bat text eol=crlf
+
+# Shell scripts MUST stay LF. gradlew is a POSIX shell script and breaks with CRLF
+# on Linux/macOS.
+gradlew text eol=lf
+*.sh text eol=lf
+
+# Binary files must never be line-ending converted or diffed as text.
+*.wav binary
+*.jar binary
+*.apk binary
+*.aab binary
+*.exe binary
+*.msi binary
+*.sys binary
+*.cat binary
+*.zip binary
+
+# Android/Java/Kotlin and Python source: keep LF in the repository.
+*.kt text eol=lf
+*.kts text eol=lf
+*.java text eol=lf
+*.py text eol=lf
+*.xml text eol=lf
+*.gradle text eol=lf
+gradle-wrapper.properties text eol=lf
