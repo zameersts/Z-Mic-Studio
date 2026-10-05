@@ -80,7 +80,8 @@
             android:background="@color/surface"
             android:padding="16dp"
             android:layout_marginTop="8dp"
-            android:contentDescription="@string/cd_paired_device_section">
+            android:screenReaderFocusable="false"
+            android:importantForAccessibility="no">
 
             <!-- Live region: pairing and forgetting must be announced, not only displayed. -->
             <TextView

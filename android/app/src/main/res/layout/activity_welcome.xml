@@ -103,7 +103,8 @@
             android:background="@color/surface"
             android:padding="16dp"
             android:layout_marginBottom="16dp"
-            android:contentDescription="@string/cd_permission_section">
+            android:screenReaderFocusable="false"
+            android:importantForAccessibility="no">
 
             <TextView
                 android:id="@+id/tvPermissionTitle"

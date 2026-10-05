@@ -87,9 +87,9 @@
     <string name="cd_toggle_stream">Start or stop streaming your phone microphone to the PC</string>
     <string name="cd_mute_stream">Mute or unmute your phone microphone</string>
     <string name="cd_open_settings">Open the system settings for Z Mic Studio</string>
-    <string name="cd_forget_paired">Remove the currently paired PC and require reconnection</string>
     <string name="cd_view_terms">Read the Terms and Privacy</string>
-    <string name="cd_paired_device_section">Paired computer details</string>
-    <string name="cd_permission_section">Permissions required for streaming</string>
+    <!-- Content descriptions must repeat the visible label first, otherwise TalkBack
+         announces a sentence that the user cannot see on screen. -->
+    <string name="cd_forget_paired">Forget Paired PC. Removes the paired computer and needs a new connection</string>
     <string name="cd_continue">Continue to the Z Mic Studio control panel</string>
 </resources>
