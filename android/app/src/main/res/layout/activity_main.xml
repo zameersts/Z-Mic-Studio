@@ -102,6 +102,16 @@
                 android:textSize="16sp"
                 android:contentDescription="@string/cd_forget_paired"
                 android:visibility="gone" />
+
+            <Button
+                android:id="@+id/btnViewTerms"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:layout_marginTop="12dp"
+                android:text="@string/btn_view_terms"
+                android:textSize="16sp"
+                android:contentDescription="@string/cd_view_terms" />
         </LinearLayout>
 
     </LinearLayout>

@@ -43,6 +43,11 @@
     <string name="welcome_btn_continue">Continue</string>
     <string name="welcome_btn_open_settings">Open App Settings</string>
 
+    <!-- Terms and Privacy (wording itself lives in Terms.kt so it matches the PC app) -->
+    <string name="welcome_terms_heading">Terms and Privacy</string>
+    <string name="welcome_terms_intro">Please read the Terms and Privacy below. Tick the box to agree, then press Continue.</string>
+    <string name="dialog_view_terms_title">Terms and Privacy</string>
+
     <!-- Permission dialog -->
     <string name="dialog_permission_title">Microphone Permission Needed</string>
     <string name="dialog_permission_message">Z Mic Studio cannot stream audio without the microphone permission. Because it was denied permanently, Android will not ask again. Open App Settings, choose Permissions, and enable Microphone.</string>
@@ -63,6 +68,7 @@
     <string name="label_paired_device">Paired PC: %1$s</string>
     <string name="label_no_paired_device">No PC paired yet</string>
     <string name="btn_forget_paired">Forget Paired PC</string>
+    <string name="btn_view_terms">View Terms and Privacy</string>
 
     <!-- Active Streaming Notification -->
     <string name="notification_channel_name">Z Mic Studio Live Streaming</string>
@@ -82,6 +88,7 @@
     <string name="cd_mute_stream">Mute or unmute your phone microphone</string>
     <string name="cd_open_settings">Open the system settings for Z Mic Studio</string>
     <string name="cd_forget_paired">Remove the currently paired PC and require reconnection</string>
+    <string name="cd_view_terms">Read the Terms and Privacy</string>
     <string name="cd_paired_device_section">Paired computer details</string>
     <string name="cd_permission_section">Permissions required for streaming</string>
     <string name="cd_continue">Continue to the Z Mic Studio control panel</string>

@@ -47,7 +47,54 @@
             android:textSize="16sp"
             android:lineSpacingExtra="4dp"
             android:textColor="@color/text_primary"
-            android:layout_marginBottom="24dp" />
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:id="@+id/tvWelcomeTermsHead"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/welcome_terms_heading"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:accessibilityHeading="true"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/tvWelcomeTermsAnnounce"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:accessibilityLiveRegion="polite"
+            android:text="@string/welcome_terms_intro"
+            android:textSize="15sp"
+            android:textColor="@color/text_secondary"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Read only terms text. Filled in from Terms.kt so the wording matches the PC app. -->
+        <ScrollView
+            android:id="@+id/termsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="260dp"
+            android:background="@color/surface"
+            android:padding="12dp"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/txtWelcomeTerms"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="15sp"
+                android:lineSpacingExtra="3dp"
+                android:textColor="@color/text_primary" />
+        </ScrollView>
+
+        <CheckBox
+            android:id="@+id/chkWelcomeAgree"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:textSize="16sp"
+            android:textColor="@color/text_primary" />
 
         <LinearLayout
             android:layout_width="match_parent"

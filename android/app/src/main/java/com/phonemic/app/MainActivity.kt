@@ -31,6 +31,7 @@ class MainActivity : Activity() {
     private lateinit var tvStatus: TextView
     private lateinit var tvPairedDevice: TextView
     private lateinit var btnForgetPaired: Button
+    private lateinit var btnViewTerms: Button
 
     private var isStreaming = false
     private var isMuted = false
@@ -92,6 +93,7 @@ class MainActivity : Activity() {
         tvStatus = findViewById(R.id.tvStatus)
         tvPairedDevice = findViewById(R.id.tvPairedDevice)
         btnForgetPaired = findViewById(R.id.btnForgetPaired)
+        btnViewTerms = findViewById(R.id.btnViewTerms)
 
         lastStatusText = tvStatus.text.toString()
         lastStatusTime = System.currentTimeMillis()
@@ -121,6 +123,8 @@ class MainActivity : Activity() {
         btnOpenSettings.setOnClickListener { openAppSettings() }
 
         btnForgetPaired.setOnClickListener { forgetPairedPc() }
+
+        btnViewTerms.setOnClickListener { showTermsDialog() }
 
         checkPermissionsAndStartDiscovery()
     }
@@ -356,6 +360,27 @@ class MainActivity : Activity() {
             .setPositiveButton(R.string.btn_open_settings) { _, _ -> openAppSettings() }
             .setNegativeButton(R.string.btn_close, null)
             .setCancelable(true)
+            .show()
+    }
+
+    private fun showTermsDialog() {
+        // Read only view of the same text the welcome screen uses.
+        val scroll = android.widget.ScrollView(this).apply {
+            isFillViewport = true
+        }
+        val text = TextView(this).apply {
+            setTextIsSelectable(true)
+            textSize = 15f
+            setTextColor(getColor(R.color.text_primary))
+            setPadding(28, 28, 28, 28)
+            setText(Terms.asText())
+        }
+        scroll.addView(text)
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_view_terms_title)
+            .setView(scroll)
+            .setPositiveButton(R.string.btn_close, null)
             .show()
     }
 

@@ -65,7 +65,62 @@
 
 ---
 
+## Done Recently
+
+- Terms and Privacy added to both apps. Same wording on PC and phone.
+- First run shows the Terms once. The user must tick a box before Continue works.
+- Acceptance is remembered. Change the wording and the user is asked again.
+- Stream tab rearranged. Status is now at the top, before the buttons.
+- Removed three duplicate status lines that were repeated on other tabs.
+- Notification Voice Mode moved from Devices to Stream, where it belongs.
+- Help tab rewritten in plain English. Added getting started and troubleshooting.
+- Help text no longer uses dash bullets, because screen readers read them out loud.
+- Virtual Cable gate added earlier: no cable, no interface.
+- Code pushed to a private GitHub repository.
+
+---
+
+## Still To Do
+
+These are decided but not started yet.
+
+1. Build a Windows executable.
+   - Use Nuitka, because it gives real protection. PyInstaller can be unpacked in
+     minutes with a public script, so it is not good enough.
+   - The C compiler is already ready. Nuitka downloaded it by itself.
+   - Still needed: a Windows icon file. There is none yet. The Android icon is a
+     vector, so a new one has to be made.
+   - Next step is a small test app that only loads wx, sounddevice, numpy and
+     scipy. If that compiles, the full app will compile. sounddevice uses CFFI,
+     which is the most likely thing to fail.
+   - Test the result on a computer that has no Python installed.
+
+2. Release signing.
+   - Android: create a release keystore soon. If the app is distributed with the
+     debug key first, a later release build cannot install over it. The debug key
+     is the same on every developer computer in the world.
+   - Windows: code signing costs money each year. Not needed while the app is
+     free and shared with a few people.
+
+3. Publishing the executable.
+   - The code repository stays private.
+   - A separate public repository would hold only the executable, the phone app
+     and a version file. That way the code is not exposed.
+   - The downloaded file should be a link to the official site, not a direct
+     download, because the vendor changes the file from time to time.
+
+4. Update checker.
+   - Reads a version file from the public downloads location.
+   - Only checks once a week, in the background, so startup stays fast.
+   - Opens the browser. It never installs anything by itself.
+   - The privacy wording in the Terms already describes this.
+
+5. Update the documentation once the above is done.
+
+---
+
 ## ⏳ Current Status & Next Steps
-- **Status**: Core system functional and covered by 4 automated test suites (all passing).
-- **Known Gap**: Release signing is not configured yet; the shipped APK is a debug build.
-- **Next Backlog**: Awaiting next user feature or enhancement request.
+- **Status**: Core system working. Four automated test suites pass.
+- **Known gap**: There is no Windows executable yet, so the app cannot be
+  handed to someone who does not have Python installed.
+- **Next Backlog**: Build the executable, starting with the small Nuitka test.

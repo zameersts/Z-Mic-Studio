@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.TextView
 
 /**
@@ -23,6 +24,9 @@ import android.widget.TextView
  * stranded on a misleading "Ready" state with no way to recover.
  */
 class WelcomeActivity : Activity() {
+
+    /** Used only to repeat the terms introduction to TalkBack after the view is built. */
+    private lateinit var tvTermsAnnounce: TextView
 
     private var audioGranted = true
 
@@ -42,14 +46,34 @@ class WelcomeActivity : Activity() {
 
         val btnContinue = findViewById<Button>(R.id.btnWelcomeContinue)
         val btnOpenSettings = findViewById<Button>(R.id.btnWelcomeOpenSettings)
+        val chkAgree = findViewById<CheckBox>(R.id.chkWelcomeAgree)
+        val txtTerms = findViewById<TextView>(R.id.txtWelcomeTerms)
 
         audioGranted = hasAudioPermission()
 
-        btnContinue.setOnClickListener { checkAndRequestPermissions() }
+        // Terms are shown before anything else. Continuing is only possible once the box
+        // is ticked, so the agreement is a real action and not a silent acceptance.
+        txtTerms.text = Terms.asText()
+        chkAgree.text = Terms.CHECKBOX_LABEL
+        chkAgree.setOnCheckedChangeListener { _, isChecked ->
+            btnContinue.isEnabled = isChecked
+        }
+        btnContinue.isEnabled = false
+
+        btnContinue.setOnClickListener {
+            if (!chkAgree.isChecked) return@setOnClickListener
+            Terms.recordAccepted(this)
+            checkAndRequestPermissions()
+        }
         btnOpenSettings.setOnClickListener { openAppSettings() }
 
         updatePermissionStatus(audioGranted && hasNotificationPermission())
         findViewById<View>(R.id.spacer).importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+
+        tvTermsAnnounce = findViewById<TextView>(R.id.tvWelcomeTermsAnnounce)
+        tvTermsAnnounce.announceForAccessibility(
+            getString(R.string.welcome_terms_intro)
+        )
     }
 
     /**

@@ -16,12 +16,17 @@ import sys
 import time
 import threading
 
+import wx
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import zmic_studio_gui as Z
 
 SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
 FAILURES = []
+
+# Kept at module scope so the wx.App is not garbage collected between tests.
+_test_app = None
 
 
 def check(condition, label, detail=""):
@@ -276,9 +281,145 @@ def test_virtual_cable_gate():
     print("  -> Passed!")
 
 
+def test_terms_and_privacy():
+    """First run Terms and Privacy: text, acceptance storage and wizard behaviour."""
+    print("Test 10: Terms and Privacy...")
+    import terms
+
+    # 1. All required sections present, in plain wording.
+    headings = [h for h, _ in terms.TERMS_SECTIONS]
+    for required in ("Acceptable Use", "Your Privacy", "Third Party Program", "No Guarantee"):
+        check(required in headings, f"section present: {required}")
+
+    # 2. Acceptable use must mention the real risks of a virtual microphone app.
+    body = terms.get_terms_as_text().lower()
+    for topic in ("permission", "another person", "privacy", "responsib"):
+        check(topic in body, f"acceptable use mentions '{topic}'")
+
+    # 3. Privacy section must not promise zero network access, because the app checks for
+    #    updates. That promise would be false.
+    check("never contacts any internet server" not in body,
+          "privacy text does not claim zero internet contact")
+    check("checks for updates" in body or "check for updates" in body,
+          "privacy text explains the update check")
+
+    # 4. No bullet or star characters that a screen reader would read out loud.
+    symbols = [ch for ch in body if ch in ("*", "\u2022", "\u25cf", "\u2023", "\u2043")]
+    check(not symbols, f"no bullet or star characters in terms text {symbols}")
+
+    # 5. Acceptance storage round trip.
+    terms.clear_terms_acceptance()
+    check(terms.is_terms_accepted() is False, "acceptance starts empty")
+    ok = terms.record_terms_accepted()
+    check(ok, "acceptance saved")
+    check(terms.is_terms_accepted() is True, "acceptance read back as accepted")
+
+    stored = terms.load_settings()
+    check(stored.get('accepted_terms_version') == terms.TERMS_VERSION,
+          "stored version matches TERMS_VERSION")
+
+    # 6. Changing the wording must force a re-read.
+    check(terms.is_terms_accepted() is True, "accepted while versions match")
+    original_version = terms.TERMS_VERSION
+    try:
+        terms.TERMS_VERSION = original_version + "-test"
+        check(terms.is_terms_accepted() is False,
+              "a wording change forces the terms to be shown again")
+    finally:
+        terms.TERMS_VERSION = original_version
+
+    # 7. Wizard exists and refuses to continue until the box is ticked.
+    # The App must be kept alive at module scope: if it is only a local it gets garbage
+    # collected and creating any window then fails with PyNoAppError.
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+    wizard = Z.TermsWizard(None)
+    check(wizard.btn_continue.IsEnabled() is False,
+          "Continue starts disabled")
+    check(wizard.chk_agree.GetValue() is False,
+          "checkbox starts unticked")
+    check(wizard.btn_continue.IsEnabled() is False,
+          "Continue stays disabled while unticked")
+    wizard.chk_agree.SetValue(True)
+    wizard.on_toggle_agree(None)
+    check(wizard.btn_continue.IsEnabled() is True,
+          "Continue enables after ticking")
+    check(wizard.chk_agree.GetLabel() == terms.TERMS_CHECKBOX_LABEL,
+          "checkbox label matches the terms module")
+    wizard.Destroy()
+
+    # 8. Read only viewer is reachable from Help.
+    viewer = Z.TermsViewer(None)
+    check(viewer.txt.GetValue() == terms.get_terms_as_text(),
+          "viewer shows the same text as the wizard")
+    viewer.Destroy()
+
+    # Restore a clean state so the next real launch shows the wizard.
+    terms.clear_terms_acceptance()
+    check(terms.is_terms_accepted() is False, "acceptance cleared for testing")
+    print("  -> Passed!")
+
+
+def test_stream_tab_ordering():
+    """Status must come first and the duplicated read-only labels must be gone."""
+    print("Test 11: Stream Tab Ordering and Noise Reduction...")
+    frame = Z.PhoneMicFrame()
+    try:
+        # The removed duplicate labels must no longer exist on the frame.
+        for gone in ("lbl_active_source", "lbl_active_sink", "lbl_active_mode"):
+            check(not hasattr(frame, gone), f"duplicate label removed: {gone}")
+
+        # The voice mode selector moved to the Stream tab.
+        check(hasattr(frame, 'cmb_voice_mode'), "voice mode selector still present")
+        check(frame.cmb_voice_mode.GetSelection() == 0, "voice mode defaults to Natural Voice")
+
+        # Status is the first child of the Stream page, before the buttons.
+        stream_page = frame.tab_stream
+        children = [c for c in stream_page.GetChildren() if not isinstance(c, wx.Sizer)]
+        status_index = None
+        button_index = None
+        for i, c in enumerate(children):
+            if c is frame.lbl_status:
+                status_index = i
+            if c is frame.btn_stream:
+                button_index = i
+        check(status_index is not None, "status label found on Stream tab")
+        check(button_index is not None, "stream button found on Stream tab")
+        check(status_index is not None and button_index is not None
+              and status_index < button_index,
+              "status appears before the buttons",
+              f"(status at {status_index}, button at {button_index})")
+
+        # The Details area shows the new plain wording.
+        check(frame.lbl_packets.GetLabel().startswith("Audio frames sent:"),
+              "frames label uses plain wording", f"({frame.lbl_packets.GetLabel()})")
+        check("Stream activity" in frame.lbl_mode.GetLabel(),
+              "activity label uses plain wording", f"({frame.lbl_mode.GetLabel()})")
+
+        # Help tab must not use dash-prefixed bullet lines any more.
+        help_text = frame.tab_help.GetChildren()
+        raw_help = ""
+        for c in help_text:
+            try:
+                label = c.GetLabel()
+            except Exception:
+                continue
+            raw_help += label + "\n"
+        check("\n- Ctrl" not in raw_help and "- Ctrl +" not in raw_help,
+              "help no longer uses dash prefixed bullets")
+        for needed in ("Getting Started", "If You Cannot Hear Anything",
+                       "Keyboard Shortcuts", "Your Privacy"):
+            check(needed in raw_help, f"help section present: {needed}")
+    finally:
+        frame.on_close(None)
+    print("  -> Passed!")
+
+
 def run_all():
     print("=" * 60)
-    print("ZMIC STUDIO PHASE 4 NOTIFICATION SYSTEM TEST SUITE")
+    print("ZMIC STUDIO PHASE 4 TEST SUITE")
     print("=" * 60)
     test_mode_selector()
     test_voice_clip_resolution()
@@ -289,6 +430,8 @@ def run_all():
     test_thread_safety()
     test_audibility_diagnostic()
     test_virtual_cable_gate()
+    test_terms_and_privacy()
+    test_stream_tab_ordering()
     print("=" * 60)
     if FAILURES:
         print(f"PHASE 4 FAILED: {len(FAILURES)} check(s) failed")
@@ -296,7 +439,7 @@ def run_all():
             print(f"  - {f}")
         print("=" * 60)
         sys.exit(1)
-    print("ALL PHASE 4 NOTIFICATION TESTS PASSED (100% SUCCESS)!")
+    print("ALL PHASE 4 TESTS PASSED (100% SUCCESS)!")
     print("=" * 60)
 
 

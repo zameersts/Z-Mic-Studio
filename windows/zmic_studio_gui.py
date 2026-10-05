@@ -20,6 +20,7 @@ import numpy as np
 import struct
 import sounddevice as sd
 import wx
+import terms
 
 def get_log_dir():
     appdata = os.environ.get('APPDATA')
@@ -1793,6 +1794,128 @@ class NotebookAccessible(wx.Accessible):
         return (wx.ACC_OK, 3)
 
 
+class TermsWizard(wx.Dialog):
+    """
+    First run dialog. The user must read the Terms and Privacy and tick the checkbox
+    before the Continue button becomes active.
+
+    The dialog cannot be dismissed by closing it or pressing Escape. Leaving without
+    ticking the box is treated as declining, because that is not agreement.
+    """
+    def __init__(self, parent=None):
+        super().__init__(
+            parent,
+            title=f"{APP_NAME} - Terms and Privacy",
+            style=wx.DEFAULT_DIALOG_STYLE
+        )
+        self.CentreOnScreen()
+        self.SetBackgroundColour(wx.Colour(30, 30, 30))
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        title_lbl = wx.StaticText(self, wx.ID_ANY, "Before you start")
+        title_lbl.SetFont(wx.Font(12, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD))
+        title_lbl.SetForegroundColour(wx.Colour(255, 204, 0))
+        sizer.Add(title_lbl, 0, wx.ALL, 14)
+
+        subtitle = wx.StaticText(self, wx.ID_ANY, "Please read the Terms and Privacy below.")
+        subtitle.SetForegroundColour(wx.Colour(230, 230, 230))
+        sizer.Add(subtitle, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 14)
+
+        # Scrollable read-only text box so every section is reachable with the keyboard.
+        self.txt_terms = wx.TextCtrl(
+            self,
+            wx.ID_ANY,
+            value=terms.get_terms_as_text(),
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP | wx.HSCROLL
+        )
+        self.txt_terms.SetBackgroundColour(wx.Colour(250, 250, 250))
+        self.txt_terms.SetForegroundColour(wx.Colour(20, 20, 20))
+        self.txt_terms.SetName("Terms and Privacy text. Use the arrow keys to scroll.")
+        self.txt_terms.SetFocus()
+        sizer.Add(self.txt_terms, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 14)
+
+        # Checkbox starts UNCHECKED on purpose. A pre-ticked box is not a real agreement.
+        self.chk_agree = wx.CheckBox(self, wx.ID_ANY, terms.TERMS_CHECKBOX_LABEL)
+        self.chk_agree.SetName(terms.TERMS_CHECKBOX_LABEL)
+        self.chk_agree.SetValue(False)
+        self.chk_agree.SetForegroundColour(wx.Colour(230, 230, 230))
+        self.chk_agree.Bind(wx.EVT_CHECKBOX, self.on_toggle_agree)
+        sizer.Add(self.chk_agree, 0, wx.ALL, 14)
+
+        self.btn_continue = wx.Button(self, wx.ID_OK, "&Continue to Z Mic Studio")
+        self.btn_continue.SetName("Continue to Z Mic Studio")
+        self.btn_continue.Enable(False)  # disabled until the box is ticked
+        self.btn_continue.Bind(wx.EVT_BUTTON, self.on_continue)
+        sizer.Add(self.btn_continue, 0, wx.ALIGN_RIGHT | wx.LEFT | wx.RIGHT | wx.BOTTOM, 14)
+
+        self.SetSizerAndFit(sizer)
+        self.SetSize(640, 560)
+        self.CentreOnScreen()
+
+        # Closing or Escape means "not agreed", so cancel is disabled on purpose.
+        self.Bind(wx.EVT_CLOSE, self.on_declined)
+
+        speak_accessibility(
+            "Before you start. Please read the Terms and Privacy. "
+            "When you have read them, tick the box that says you agree, "
+            "then press Continue."
+        )
+
+    def on_toggle_agree(self, event):
+        self.btn_continue.Enable(self.chk_agree.GetValue())
+
+    def on_continue(self, event):
+        if not self.chk_agree.GetValue():
+            return
+        terms.record_terms_accepted()
+        log.info("Terms and Privacy accepted.")
+        self.EndModal(wx.ID_OK)
+
+    def on_declined(self, event):
+        log.info("Terms dialog closed without agreement.")
+        self.EndModal(wx.ID_CANCEL)
+
+
+class TermsViewer(wx.Dialog):
+    """Read only view of the Terms and Privacy, opened from the Help tab."""
+
+    def __init__(self, parent=None):
+        super().__init__(
+            parent,
+            title=f"{APP_NAME} - Terms and Privacy",
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER
+        )
+        self.CentreOnScreen()
+        self.SetBackgroundColour(wx.Colour(30, 30, 30))
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        heading = wx.StaticText(self, wx.ID_ANY, "Terms and Privacy")
+        heading.SetFont(wx.Font(11, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD))
+        heading.SetForegroundColour(wx.Colour(255, 204, 0))
+        sizer.Add(heading, 0, wx.ALL, 12)
+
+        self.txt = wx.TextCtrl(
+            self, wx.ID_ANY, value=terms.get_terms_as_text(),
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP | wx.HSCROLL
+        )
+        self.txt.SetBackgroundColour(wx.Colour(250, 250, 250))
+        self.txt.SetForegroundColour(wx.Colour(20, 20, 20))
+        self.txt.SetName("Terms and Privacy text. Use the arrow keys to scroll.")
+        self.txt.SetFocus()
+        sizer.Add(self.txt, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 12)
+
+        btn_close = wx.Button(self, wx.ID_CANCEL, "&Close")
+        btn_close.SetName("Close Terms and Privacy")
+        sizer.Add(btn_close, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
+
+        self.SetSizerAndFit(sizer)
+        self.SetSize(620, 520)
+        self.CentreOnScreen()
+        self.Bind(wx.EVT_BUTTON, lambda e: self.EndModal(wx.ID_CANCEL), id=wx.ID_CANCEL)
+
+
 class VirtualCableRequiredGate(wx.Dialog):
     """
     Startup gate shown when VB-Audio Virtual Cable ('CABLE Input') is not installed.
@@ -2080,7 +2203,16 @@ class ZMicStudioFrame(wx.Frame):
         page = wx.Panel(parent)
         sizer = wx.BoxSizer(wx.VERTICAL)
 
-        # 1. Stream Action Buttons
+        # 1. Status comes FIRST. It is the one thing a user always wants to know, and a
+        #    screen reader should not have to pass several controls to reach it.
+        self.lbl_status = wx.StaticText(page, wx.ID_ANY, "Status: Ready. Press Start Audio Stream to listen.")
+        self.lbl_status.SetFont(self.lbl_status.GetFont().Bold())
+        self.lbl_status.SetName("Status")
+        sizer.Add(self.lbl_status, 0, wx.EXPAND | wx.ALL, 10)
+
+        sizer.Add(wx.StaticLine(page), 0, wx.EXPAND | wx.TOP | wx.BOTTOM, 8)
+
+        # 2. Main actions
         btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.btn_stream = wx.Button(page, wx.ID_ANY, "Start Audio Stream (Alt+&R)")
         self.btn_stream.SetName("Start Audio Stream (Alt+R)")
@@ -2107,26 +2239,42 @@ class ZMicStudioFrame(wx.Frame):
 
         sizer.Add(wx.StaticLine(page), 0, wx.EXPAND | wx.TOP | wx.BOTTOM, 8)
 
-        # 3. Stream Status Display
-        self.lbl_status = wx.StaticText(page, wx.ID_ANY, "Status: Ready. Press Start Audio Stream to listen.")
-        self.lbl_status.SetFont(self.lbl_status.GetFont().Bold())
-        sizer.Add(self.lbl_status, 0, wx.ALL, 6)
+        # 3. Details. Only values that actually change while running are shown here.
+        #    The old tab repeated the input device, output sink and channel mode, but those
+        #    already appear as controls on the Devices and Effects tabs, so a screen reader
+        #    had to hear the same fact several times.
+        lbl_details_head = wx.StaticText(page, wx.ID_ANY, "Details")
+        lbl_details_head.SetFont(lbl_details_head.GetFont().Bold())
+        lbl_details_head.SetName("Details")
+        sizer.Add(lbl_details_head, 0, wx.LEFT | wx.TOP, 8)
 
-        self.lbl_active_source = wx.StaticText(page, wx.ID_ANY, "Active Input Device: Phone (Wi-Fi Wireless Streaming)")
-        sizer.Add(self.lbl_active_source, 0, wx.ALL, 6)
+        self.lbl_mode = wx.StaticText(page, wx.ID_ANY, "Stream activity: Waiting for phone")
+        self.lbl_mode.SetName("Stream activity: Waiting for phone")
+        sizer.Add(self.lbl_mode, 0, wx.LEFT | wx.RIGHT, 8)
 
-        self.lbl_active_sink = wx.StaticText(page, wx.ID_ANY, f"Virtual Output Sink: {self.target_cable_name}")
-        self.lbl_active_sink.SetName(f"Virtual Output Sink: {self.target_cable_name}")
-        sizer.Add(self.lbl_active_sink, 0, wx.ALL, 6)
+        self.lbl_packets = wx.StaticText(page, wx.ID_ANY, "Audio frames sent: 0")
+        self.lbl_packets.SetName("Audio frames sent: 0")
+        sizer.Add(self.lbl_packets, 0, wx.ALL, 8)
 
-        self.lbl_active_mode = wx.StaticText(page, wx.ID_ANY, "Channel Mode: Stereo 3D (Dual Mic Spatial Panning)")
-        sizer.Add(self.lbl_active_mode, 0, wx.ALL, 6)
+        # 4. Notification Voice Mode. This belongs with streaming rather than with devices,
+        #    because it is a preference a user changes while a stream is running.
+        sizer.Add(wx.StaticLine(page), 0, wx.EXPAND | wx.TOP | wx.BOTTOM, 8)
 
-        self.lbl_mode = wx.StaticText(page, wx.ID_ANY, "Hardware Stream Activity: Not Connected")
-        sizer.Add(self.lbl_mode, 0, wx.ALL, 6)
+        lbl_notify_head = wx.StaticText(page, wx.ID_ANY, "Notification Voice Mode:")
+        lbl_notify_head.SetFont(lbl_notify_head.GetFont().Bold())
+        sizer.Add(lbl_notify_head, 0, wx.LEFT | wx.TOP, 6)
 
-        self.lbl_packets = wx.StaticText(page, wx.ID_ANY, "Audio Frames Processed: 0")
-        sizer.Add(self.lbl_packets, 0, wx.ALL, 6)
+        self.cmb_voice_mode = wx.Choice(page, wx.ID_ANY, choices=[
+            "Natural Voice",
+            "NVDA Screen Reader Only",
+            "Beeps / Tone Cues Only"
+        ])
+        self.cmb_voice_mode.SetName(
+            "Notification Voice Mode. Choose between Natural Voice, NVDA Screen Reader, or Beeps."
+        )
+        self.cmb_voice_mode.SetSelection(0)
+        self.cmb_voice_mode.Bind(wx.EVT_CHOICE, self.on_voice_mode_changed)
+        sizer.Add(self.cmb_voice_mode, 0, wx.EXPAND | wx.ALL, 6)
 
         page.SetSizer(sizer)
         return page
@@ -2213,23 +2361,6 @@ class ZMicStudioFrame(wx.Frame):
         )
         self.chk_allow_speakers.Bind(wx.EVT_CHECKBOX, self.on_allow_speakers_changed)
         sizer.Add(self.chk_allow_speakers, 0, wx.ALL, 6)
-
-        sizer.Add(wx.StaticLine(page), 0, wx.EXPAND | wx.TOP | wx.BOTTOM, 8)
-
-        # 3. Notification Voice / Audio Prompts
-        lbl_notify_head = wx.StaticText(page, wx.ID_ANY, "Notification Voice Mode:")
-        lbl_notify_head.SetFont(lbl_notify_head.GetFont().Bold())
-        sizer.Add(lbl_notify_head, 0, wx.LEFT | wx.TOP, 6)
-
-        self.cmb_voice_mode = wx.Choice(page, wx.ID_ANY, choices=[
-            "Natural Voice",
-            "NVDA Screen Reader Only",
-            "Beeps / Tone Cues Only"
-        ])
-        self.cmb_voice_mode.SetName("Notification Voice Mode. Choose between Natural Voice, NVDA Screen Reader, or Beeps.")
-        self.cmb_voice_mode.SetSelection(0)
-        self.cmb_voice_mode.Bind(wx.EVT_CHOICE, self.on_voice_mode_changed)
-        sizer.Add(self.cmb_voice_mode, 0, wx.ALL, 6)
 
         page.SetSizer(sizer)
         return page
@@ -2376,61 +2507,146 @@ class ZMicStudioFrame(wx.Frame):
         page = wx.Panel(parent)
         sizer = wx.BoxSizer(wx.VERTICAL)
 
-        help_title = wx.StaticText(page, wx.ID_ANY, "Keyboard Shortcuts for Screen Readers (NVDA):")
-        help_title.SetFont(help_title.GetFont().Bold())
-        sizer.Add(help_title, 0, wx.ALL, 8)
+        # Wording rules for this tab:
+        # 1. Plain English, short sentences.
+        # 2. No bullet or star characters. A screen reader reads each bullet aloud,
+        #    which breaks the rhythm of the sentence and adds noise.
+        # 3. One idea per line, with a blank line between sections.
 
-        shortcuts_text = (
-            "- Ctrl + Tab / Ctrl + Shift + Tab: Switch between Tabs\n"
-            "- Ctrl + 1: Jump directly to Stream Tab\n"
-            "- Ctrl + 2: Jump directly to Devices Tab\n"
-            "- Ctrl + 3: Jump directly to Audio Effects Tab\n"
-            "- Ctrl + 4: Jump directly to Help & Shortcuts Tab\n"
-            "- Alt + R: Start or Stop Audio Stream (works from any tab)\n"
-            "- Alt + M: Mute or Unmute Microphone (works from any tab)\n"
-            "- Alt + I: Jump directly to Audio Input Device selector (in Devices tab)\n"
-            "- Alt + N: Toggle Continuous Noise Reduction On / Off (works from any tab)\n"
-            "- Alt + E: Toggle Studio Echo On / Off (works from any tab)\n"
-            "- Alt + P: Toggle Ping-Pong Stereo Bounce On / Off (works from any tab)\n"
-            "- Alt + H: Toggle Hear Myself in Headphones (works from any tab)\n"
-            "- Alt + A: Open About Dialog (Created & Designed by Zameer)\n"
-            "- Enter / Space: Activate focused button or toggle focused checkbox\n"
-            "- Up / Down Arrow: Switch Channel Routing Mode instantly\n"
-            "- Left / Right Arrow: Adjust sliders (Volume, Noise Reduction, Stereo Width, Echo Delay/Intensity)\n"
-            "- Page Up / Page Down: Adjust sliders by larger increments\n"
+        help_text = (
+            "Getting Started\n"
+            "\n"
+            "Step 1. On your computer, install VB-Audio Virtual Cable.\n"
+            "You can get it from www.vb-cable.com\n"
+            "After installing it, restart your computer.\n"
+            "\n"
+            "Step 2. Open Z Mic Studio on your phone.\n"
+            "\n"
+            "Step 3. Go to the Devices tab.\n"
+            "\n"
+            "Step 4. Your phone will appear in the list after a few seconds.\n"
+            "Move to it and press Enter to connect.\n"
+            "\n"
+            "Step 5. Go to the Stream tab and check the status at the top.\n"
+            "\n"
+            "\n"
+            "If You Cannot Hear Anything\n"
+            "\n"
+            "Check these one at a time.\n"
+            "\n"
+            "First, open the Stream tab and read the status at the top.\n"
+            "\n"
+            "Second, open Discord, OBS or Zoom and choose CABLE Output\n"
+            "as the microphone. Do not choose CABLE Input.\n"
+            "\n"
+            "Third, make sure the microphone is not muted.\n"
+            "Press Alt plus M to check.\n"
+            "\n"
+            "Fourth, check that your phone and computer are on the same\n"
+            "Wi-Fi network.\n"
+            "\n"
+            "Fifth, press the Open Log File button below to see what\n"
+            "happened when the app started.\n"
+            "\n"
+            "\n"
+            "If Your Phone Does Not Appear In The List\n"
+            "\n"
+            "Check these one at a time.\n"
+            "\n"
+            "First, make sure the Z Mic Studio app is open on your phone.\n"
+            "\n"
+            "Second, check that your phone and computer are on the same\n"
+            "Wi-Fi network.\n"
+            "\n"
+            "Third, some Wi-Fi networks block devices from finding each\n"
+            "other. A normal home Wi-Fi usually works.\n"
+            "\n"
+            "\n"
+            "Keyboard Shortcuts\n"
+            "\n"
+            "Ctrl plus 1 goes to the Stream tab.\n"
+            "Ctrl plus 2 goes to the Devices tab.\n"
+            "Ctrl plus 3 goes to the Audio Effects tab.\n"
+            "Ctrl plus 4 goes to the Help tab.\n"
+            "Ctrl plus Tab moves to the next tab.\n"
+            "Ctrl plus Shift plus Tab moves to the previous tab.\n"
+            "\n"
+            "Alt plus R starts or stops the audio stream.\n"
+            "Alt plus M mutes or unmutes the microphone.\n"
+            "Alt plus I goes to the audio input selector.\n"
+            "Alt plus N turns noise reduction on or off.\n"
+            "Alt plus E turns studio echo on or off.\n"
+            "Alt plus P turns ping pong delay on or off.\n"
+            "Alt plus H turns headphone monitoring on or off.\n"
+            "Alt plus A opens the About window.\n"
+            "\n"
+            "Ctrl plus Alt plus M mutes or unmutes the microphone from\n"
+            "any program on your computer, even when Z Mic Studio is not\n"
+            "in front.\n"
+            "\n"
+            "Enter presses the button you are on.\n"
+            "Space ticks or unticks the box you are on.\n"
+            "Left arrow makes a slider smaller.\n"
+            "Right arrow makes a slider bigger.\n"
+            "Page Up and Page Down change a slider in bigger steps.\n"
+            "\n"
+            "\n"
+            "Your Privacy\n"
+            "\n"
+            "Your audio only travels between your phone and your computer.\n"
+            "It is never sent to a website or to a server.\n"
+            "This app has no account and no advertising.\n"
+            "You can read the full Terms and Privacy with the button below.\n"
+            "\n"
+            "\n"
+            "About Z Mic Studio\n"
+            "\n"
+            f"Version {APP_VERSION_DISPLAY}\n"
+            "Created and designed by Zameer\n"
+            "\n"
+            "Z Mic Studio turns your phone into a microphone for your computer.\n"
+            "It is made to work with screen readers such as NVDA, JAWS and\n"
+            "Windows Narrator, and with Google TalkBack on Android.\n"
         )
-        lbl_shortcuts = wx.StaticText(page, wx.ID_ANY, shortcuts_text)
-        sizer.Add(lbl_shortcuts, 0, wx.ALL, 8)
+
+        lbl_help = wx.StaticText(page, wx.ID_ANY, help_text)
+        lbl_help.SetName("Help and instructions")
+        sizer.Add(lbl_help, 0, wx.ALL, 10)
+
+        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        # Terms: always reachable, not only on the first run.
+        self.btn_view_terms = wx.Button(page, wx.ID_ANY, "View &Terms and Privacy")
+        self.btn_view_terms.SetName("View Terms and Privacy")
+        self.btn_view_terms.SetDefault()
+        self._make_button_accessible(self.btn_view_terms, self.on_view_terms)
+        btn_sizer.Add(self.btn_view_terms, 0, wx.RIGHT, 10)
 
         # Diagnostics: the log file is the only way to debug a failed stream.
         self.btn_open_log = wx.Button(page, wx.ID_ANY, "Open &Log File")
         self.btn_open_log.SetName("Open Log File")
-        self.btn_open_log.SetToolTip(f"Opens the ZMic Studio diagnostic log:\n{LOG_FILE}")
+        self.btn_open_log.SetToolTip(f"Opens the Z Mic Studio diagnostic log:\n{LOG_FILE}")
         self._make_button_accessible(self.btn_open_log, self.on_open_log)
-        sizer.Add(self.btn_open_log, 0, wx.ALL, 8)
+        btn_sizer.Add(self.btn_open_log, 0)
 
-        lbl_log_path = wx.StaticText(page, wx.ID_ANY, f"Log file location: {LOG_FILE}")
+        sizer.Add(btn_sizer, 0, wx.ALL, 10)
+
+        lbl_log_path = wx.StaticText(page, wx.ID_ANY, f"Log file: {LOG_FILE}")
         lbl_log_path.SetForegroundColour(wx.Colour(150, 150, 150))
         lbl_log_path.SetName(f"Log file location: {LOG_FILE}")
-        sizer.Add(lbl_log_path, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
-
-        # About ZMic Studio & Creator Credit Box
-        about_title = wx.StaticText(page, wx.ID_ANY, "About ZMic Studio:")
-        about_title.SetFont(about_title.GetFont().Bold())
-        sizer.Add(about_title, 0, wx.ALL, 8)
-
-        about_text = (
-            f"ZMic Studio {APP_VERSION_DISPLAY}\n"
-            "Created & Designed by Zameer\n\n"
-            "An accessible, studio-grade virtual microphone system bridging your smartphone\n"
-            "and Windows PC over local Wi-Fi with crystal-clear 48kHz dual-mic stereo sound.\n\n"
-            "Press Alt + A at any time to open the About Dialog."
-        )
-        lbl_about = wx.StaticText(page, wx.ID_ANY, about_text)
-        sizer.Add(lbl_about, 0, wx.ALL, 8)
+        sizer.Add(lbl_log_path, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         page.SetSizer(sizer)
         return page
+
+    def on_view_terms(self, event=None):
+        """Opens the read only Terms and Privacy window."""
+        log.info("User opened the Terms and Privacy window.")
+        dlg = TermsViewer(self)
+        dlg.ShowModal()
+        dlg.Destroy()
+        speak_accessibility("Terms and Privacy window closed.")
+
 
     def _set_channel_mode(self, mode_name, btn):
         """Updates DSP channel mode and synchronizes all UI indicators."""
@@ -2445,7 +2661,7 @@ class ZMicStudioFrame(wx.Frame):
         }
         full = mode_full_names.get(mode_name, mode_name)
         self.lbl_mode_status.SetLabel(f"Selected Mode: {full}")
-        self.lbl_active_mode.SetLabel(f"Channel Mode: {full}")
+        log.info(f"Channel routing mode set to: {full}")
 
     # Event Handlers
     def on_phone_list_key_down(self, event):
@@ -2630,7 +2846,7 @@ class ZMicStudioFrame(wx.Frame):
                 # Set the label only after the engine has started, otherwise start()'s own
                 # status callback overwrites it and the user never sees the confirmation.
                 self.lbl_status.SetLabel(f"Status: Connected to {name} ({ip}) - Streaming Active")
-                self.lbl_active_source.SetLabel(f"Active Input Device: {name} (Wi-Fi Wireless Streaming)")
+                log.info(f"Active input device is now {name} over Wi-Fi.")
                 notify_event("phone_connected", f"Connected to {name}", 1000, 150)
             else:
                 self.lbl_status.SetLabel(f"Status Error: {msg}")
@@ -2750,11 +2966,11 @@ class ZMicStudioFrame(wx.Frame):
         sel = self.cmb_input_source.GetSelection()
         if sel != wx.NOT_FOUND:
             src_type, dev_id, label = self.input_source_items[sel]
-            self.lbl_packets.SetLabel("Audio Frames Processed: 0")
+            self.lbl_packets.SetLabel("Audio frames sent: 0")
 
             if src_type == "phone":
-                self.lbl_active_source.SetLabel("Active Input Device: Phone (Wi-Fi Wireless Streaming)")
-                self.lbl_mode.SetLabel("Hardware Stream Activity: Waiting for Phone on UDP")
+                self.lbl_mode.SetLabel("Stream activity: Waiting for phone")
+                log.info("Input device set to Phone over Wi-Fi.")
                 self.engine.input_mode = "phone"
                 self.engine.input_device_id = None
                 if self.engine.is_running:
@@ -2771,8 +2987,8 @@ class ZMicStudioFrame(wx.Frame):
                 else:
                     speak_accessibility("Switched to Phone. Waiting for Wi-Fi connection.")
             else:
-                self.lbl_active_source.SetLabel(f"Active Input Device: {label}")
-                self.lbl_mode.SetLabel(f"Hardware Stream Activity: Capturing from {label}")
+                log.info(f"Input device set to {label}.")
+                self.lbl_mode.SetLabel(f"Stream activity: Capturing from {label}")
 
                 # If engine is already running, seamlessly hot-swap to the selected PC mic
                 if self.engine.is_running:
@@ -2852,8 +3068,10 @@ class ZMicStudioFrame(wx.Frame):
         try:
             if not self or not hasattr(self, 'lbl_packets') or not self.lbl_packets:
                 return
-            self.lbl_packets.SetLabel(f"Audio Frames Processed: {count}")
-            self.lbl_mode.SetLabel(f"Hardware Stream Activity: Active ({mode_str})")
+            self.lbl_packets.SetLabel(f"Audio frames sent: {count}")
+            mode_label = f"Stream activity: Active ({mode_str})"
+            self.lbl_mode.SetLabel(mode_label)
+            self.lbl_mode.SetName(mode_label)
         except Exception:
             pass
 
@@ -2971,6 +3189,22 @@ def main():
             gate.Destroy()
             log.info("Closed at the virtual cable gate. Install the driver, restart, reopen.")
             return 0
+
+        # ---- Terms and Privacy --------------------------------------------
+        # Shown on the first run, and again whenever the wording changes. Declining closes
+        # the application. Skipped under test so automated suites are never blocked by a
+        # modal dialog.
+        is_test_run = getattr(sys, '_running_tests', False) or os.environ.get('ZMIC_TEST_MODE') == '1'
+        if not is_test_run and not terms.is_terms_accepted():
+            log.info("Showing first run Terms and Privacy.")
+            wizard = TermsWizard(None)
+            result = wizard.ShowModal()
+            wizard.Destroy()
+            if result != wx.ID_OK:
+                log.info("Terms and Privacy were not accepted. Closing.")
+                return 0
+        else:
+            log.info(f"Terms and Privacy already accepted (version {terms.TERMS_VERSION}).")
 
         frame = ZMicStudioFrame()
         frame.Show()
