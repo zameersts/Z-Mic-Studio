@@ -2049,8 +2049,8 @@ class ZMicStudioFrame(wx.Frame):
         # Start Wi-Fi discovery daemon
         self.discovery.start()
 
-        # Auto-start receiver on launch so audio is immediately available
-        wx.CallAfter(self._auto_start_receiver)
+        # Streaming waits for the user to press Start Audio Stream on the Stream tab.
+        # Starting it on launch gave the user no control over when the microphone opened.
 
     def _setup_global_hotkeys(self):
         """Registers system-wide global hotkey Ctrl+Alt+M via Win32 RegisterHotKey."""
@@ -2079,6 +2079,8 @@ class ZMicStudioFrame(wx.Frame):
         self.id_tab_devices = wx.NewIdRef()
         self.id_tab_effects = wx.NewIdRef()
         self.id_tab_help = wx.NewIdRef()
+        self.id_tab_next = wx.NewIdRef()
+        self.id_tab_prev = wx.NewIdRef()
 
         entries = [
             wx.AcceleratorEntry(wx.ACCEL_ALT, ord('R'), self.id_hotkey_stream.GetId()),
@@ -2101,6 +2103,10 @@ class ZMicStudioFrame(wx.Frame):
             wx.AcceleratorEntry(wx.ACCEL_CTRL, ord('2'), self.id_tab_devices.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_CTRL, ord('3'), self.id_tab_effects.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_CTRL, ord('4'), self.id_tab_help.GetId()),
+            # Ctrl+Tab moves to the next tab. Registered explicitly because wx.Notebook does not
+            # provide it reliably, and the Help tab documents it.
+            wx.AcceleratorEntry(wx.ACCEL_CTRL, wx.WXK_TAB, self.id_tab_next.GetId()),
+            wx.AcceleratorEntry(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, wx.WXK_TAB, self.id_tab_prev.GetId()),
         ]
         self.SetAcceleratorTable(wx.AcceleratorTable(entries))
 
@@ -2116,9 +2122,21 @@ class ZMicStudioFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda e: self.notebook.SetSelection(1), id=self.id_tab_devices.GetId())
         self.Bind(wx.EVT_MENU, lambda e: self.notebook.SetSelection(2), id=self.id_tab_effects.GetId())
         self.Bind(wx.EVT_MENU, lambda e: self.notebook.SetSelection(3), id=self.id_tab_help.GetId())
+        self.Bind(wx.EVT_MENU, self.on_next_tab, id=self.id_tab_next.GetId())
+        self.Bind(wx.EVT_MENU, self.on_previous_tab, id=self.id_tab_prev.GetId())
+
+    def on_next_tab(self, event=None):
+        """Ctrl+Tab: move to the next tab, wrapping around at the end."""
+        count = self.notebook.GetPageCount()
+        self.notebook.SetSelection((self.notebook.GetSelection() + 1) % count)
+
+    def on_previous_tab(self, event=None):
+        """Ctrl+Shift+Tab: move to the previous tab, wrapping around at the start."""
+        count = self.notebook.GetPageCount()
+        self.notebook.SetSelection((self.notebook.GetSelection() - 1) % count)
 
     def on_char_hook(self, event):
-        """Global key hook ensuring Enter triggers buttons and sliders ignore Up/Down."""
+        """Global key hook. Enter on a button must activate it, for screen reader users."""
         key = event.GetKeyCode()
         focus = wx.Window.FindFocus()
         if focus and isinstance(focus, wx.Button) and key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
@@ -2126,9 +2144,9 @@ class ZMicStudioFrame(wx.Frame):
             cmd.SetEventObject(focus)
             focus.GetEventHandler().ProcessEvent(cmd)
             return
-        if focus and isinstance(focus, wx.Slider) and key in (wx.WXK_UP, wx.WXK_DOWN):
-            # Block Up/Down on horizontal sliders so focus or accidental presses don't change values
-            return
+        # Sliders are left alone here so that Up and Down keep adjusting the value.
+        # Screen reader users expect Up to mean increase and Down to mean decrease
+        # on any slider, not only on vertical ones.
         event.Skip()
 
     def _make_button_accessible(self, btn, callback):
@@ -2136,41 +2154,51 @@ class ZMicStudioFrame(wx.Frame):
         btn.Bind(wx.EVT_BUTTON, callback)
 
     def _make_slider_accessible(self, slider, on_change):
-        """Ensures horizontal sliders respond to Left/Right only and ignore Up/Down so focus is not confused."""
+        """
+        Sliders answer to Left and Right, and also to Up and Down.
+
+        wxWidgets only handles Left and Right on a horizontal slider, so Up and Down are
+        implemented here. A screen reader user expects Up to mean larger and Down to mean
+        smaller on any slider, and the arrow keys must not fall through to the notebook
+        and switch tabs.
+        """
         slider.Bind(wx.EVT_SLIDER, on_change)
+
         def on_slider_key(evt):
             key = evt.GetKeyCode()
-            if key in (wx.WXK_UP, wx.WXK_DOWN):
+            if key not in (wx.WXK_UP, wx.WXK_DOWN):
+                evt.Skip()
                 return
-            evt.Skip()
+
+            step = slider.GetLineSize()
+            current = slider.GetValue()
+            new_value = current + step if key == wx.WXK_UP else current - step
+            new_value = max(slider.GetMin(), min(slider.GetMax(), new_value))
+
+            if new_value != current:
+                slider.SetValue(new_value)
+                slider.SetFocus()
+                on_change(wx.CommandEvent(wx.EVT_SLIDER.typeId, slider.GetId()))
+            # Always consumed: Up and Down must never reach the notebook.
+
         slider.Bind(wx.EVT_KEY_DOWN, on_slider_key)
 
-    def _auto_start_receiver(self):
-        if getattr(sys, '_running_tests', False) or os.environ.get('ZMIC_TEST_MODE') == '1':
-            return
+    def _show_stopped_status(self, reason=None):
+        """
+        Puts the Stream tab into its waiting state.
 
-        # The startup gate already guaranteed a virtual cable before this frame was built.
-        # This is a defensive check only: a driver change requires a reboot, so reaching this
-        # branch means the cable disappeared while running.
-        if self.default_cable_idx == -1:
-            log.error("Virtual audio cable vanished while running; streaming is blocked.")
-            self.lbl_status.SetLabel("Status: Virtual audio cable lost. Please restart Z Mic Studio.")
-            play_audio_cue(400, 250)
-            speak_accessibility("Virtual audio cable was lost. Please restart Z Mic Studio.")
-            return
-
-        if not self.engine.is_running:
-            ok, msg = self.engine.start(PORT_DEFAULT, self.target_cable_id)
-            if ok:
-                self.btn_stream.SetLabel("Stop Audio Stream (Alt+&R)")
-                self.btn_stream.SetName("Stop Audio Stream (Alt+R)")
-                self.btn_mute.Enable()
-                self.lbl_status.SetLabel("Status: Ready. Searching for ZMic Studio on local Wi-Fi...")
-            else:
-                self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
-                self.btn_stream.SetName("Start Audio Stream (Alt+R)")
-                self.btn_mute.Disable()
-                self.lbl_status.SetLabel(f"Status: {msg}")
+        Used when the engine is not running, so the buttons and the status line always
+        match what the engine is actually doing.
+        """
+        self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
+        self.btn_stream.SetName("Start Audio Stream (Alt+R)")
+        self.btn_mute.Disable()
+        if reason:
+            self.lbl_status.SetLabel(f"Status: {reason}")
+        else:
+            self.lbl_status.SetLabel(
+                "Status: Not streaming. Press Start Audio Stream on this tab to begin."
+            )
 
     def _build_ui(self):
         panel = wx.Panel(self)
@@ -2205,7 +2233,10 @@ class ZMicStudioFrame(wx.Frame):
 
         # 1. Status comes FIRST. It is the one thing a user always wants to know, and a
         #    screen reader should not have to pass several controls to reach it.
-        self.lbl_status = wx.StaticText(page, wx.ID_ANY, "Status: Ready. Press Start Audio Stream to listen.")
+        self.lbl_status = wx.StaticText(
+            page, wx.ID_ANY,
+            "Status: Not streaming. Press Start Audio Stream on this tab to begin."
+        )
         self.lbl_status.SetFont(self.lbl_status.GetFont().Bold())
         self.lbl_status.SetName("Status")
         sizer.Add(self.lbl_status, 0, wx.EXPAND | wx.ALL, 10)
@@ -2328,16 +2359,17 @@ class ZMicStudioFrame(wx.Frame):
 
         # Microphone Input Source Selector (Alt+I)
         sizer.Add(wx.StaticText(page, wx.ID_ANY, "Audio Input Device (Microphone) (Alt+&I):"), 0, wx.LEFT | wx.TOP, 6)
-        self.input_source_items = [("phone", None, "Phone (Wi-Fi Wireless Streaming)")]
-        for dev_id, name in self.input_devices:
-            self.input_source_items.append(("pc", dev_id, name))
-
-        src_choices = [label for _, _, label in self.input_source_items]
-        self.cmb_input_source = wx.Choice(page, wx.ID_ANY, choices=src_choices)
+        self.cmb_input_source = wx.Choice(page, wx.ID_ANY, choices=[])
         self.cmb_input_source.SetName("Audio Input Device (Microphone) (Alt+I)")
-        self.cmb_input_source.SetSelection(0)
         self.cmb_input_source.Bind(wx.EVT_CHOICE, self.on_input_source_changed)
         sizer.Add(self.cmb_input_source, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
+
+        # Explains the list, because an empty list on its own is not an explanation.
+        self.lbl_input_hint = wx.StaticText(page, wx.ID_ANY, "")
+        self.lbl_input_hint.SetForegroundColour(wx.Colour(90, 90, 90))
+        sizer.Add(self.lbl_input_hint, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
+
+        self._rebuild_input_sources()
 
         # Virtual Audio Cable Status (Background Auto-bound)
         if self.default_cable_idx != -1 and self.devices:
@@ -2512,132 +2544,240 @@ class ZMicStudioFrame(wx.Frame):
         # 2. No bullet or star characters. A screen reader reads each bullet aloud,
         #    which breaks the rhythm of the sentence and adds noise.
         # 3. One idea per line, with a blank line between sections.
+        #
+        # The text is split into sections and only one is shown at a time. Reading a
+        # single long block through a screen reader is tiring, and most people only
+        # need one part of it.
+        self.HELP_SECTIONS = [
+            (
+                "Getting Started",
+                "Step 1. On your computer, install VB-Audio Virtual Cable.\n"
+                "You can get it from www.vb-cable.com\n"
+                "After installing it, restart your computer.\n"
+                "\n"
+                "Step 2. Open Z Mic Studio on your phone.\n"
+                "\n"
+                "Step 3. Go to the Devices tab.\n"
+                "\n"
+                "Step 4. Your phone will appear in the list after a few seconds.\n"
+                "Move to it and press Enter to connect.\n"
+                "\n"
+                "Step 5. Go to the Stream tab and check the status at the top."
+            ),
+            (
+                "If You Cannot Hear Anything",
+                "Check these one at a time.\n"
+                "\n"
+                "First, open the Stream tab and read the status at the top.\n"
+                "\n"
+                "Second, open Discord, OBS or Zoom and choose CABLE Output\n"
+                "as the microphone. Do not choose CABLE Input.\n"
+                "\n"
+                "Third, make sure the microphone is not muted.\n"
+                "Press Alt plus M to check.\n"
+                "\n"
+                "Fourth, check that your phone and computer are on the same\n"
+                "Wi-Fi network.\n"
+                "\n"
+                "Fifth, press the Troubleshooting Log button below and read\n"
+                "the last few lines. That will tell you what went wrong."
+            ),
+            (
+                "If Your Phone Does Not Appear",
+                "Check these one at a time.\n"
+                "\n"
+                "First, make sure the Z Mic Studio app is open on your phone.\n"
+                "\n"
+                "Second, check that your phone and computer are on the same\n"
+                "Wi-Fi network.\n"
+                "\n"
+                "Third, some Wi-Fi networks stop devices from finding each\n"
+                "other. A normal home Wi-Fi usually works."
+            ),
+            (
+                "Keyboard Shortcuts",
+                "Moving between tabs.\n"
+                "Ctrl plus Tab goes to the next tab.\n"
+                "Ctrl plus Shift plus Tab goes to the previous tab.\n"
+                "Ctrl plus 1 goes to the Stream tab.\n"
+                "Ctrl plus 2 goes to the Devices tab.\n"
+                "Ctrl plus 3 goes to the Audio Effects tab.\n"
+                "Ctrl plus 4 goes to the Help tab.\n"
+                "\n"
+                "Main actions. These work from any tab.\n"
+                "Alt plus R starts or stops the audio stream.\n"
+                "Alt plus M mutes or unmutes the microphone.\n"
+                "Alt plus I goes to the audio input selector.\n"
+                "Alt plus N turns noise reduction on or off.\n"
+                "Alt plus E turns studio echo on or off.\n"
+                "Alt plus P turns ping pong delay on or off.\n"
+                "Alt plus H turns headphone monitoring on or off.\n"
+                "Alt plus A opens the About window.\n"
+                "\n"
+                "Global shortcut.\n"
+                "Ctrl plus Alt plus M mutes or unmutes the microphone from\n"
+                "any program on your computer, even when Z Mic Studio is not\n"
+                "in front.\n"
+                "\n"
+                "Working with buttons and boxes.\n"
+                "Enter presses the button you are on.\n"
+                "Space ticks or unticks the box you are on.\n"
+                "\n"
+                "Working with a slider.\n"
+                "Right arrow and Up arrow make the value bigger.\n"
+                "Left arrow and Down arrow make the value smaller.\n"
+                "Page Up and Page Down change it in bigger steps.\n"
+                "\n"
+                "Working with the channel mode buttons.\n"
+                "Up arrow and Down arrow move between them and also change\n"
+                "the channel mode."
+            ),
+            (
+                "Your Privacy",
+                "Your audio only travels between your phone and your computer.\n"
+                "It is never sent to a website or to a server.\n"
+                "\n"
+                "This app has no account and no advertising.\n"
+                "There is no tracking and no analytics.\n"
+                "\n"
+                "Once a week the app checks whether a new version is ready.\n"
+                "That check does not send anything about you or your computer.\n"
+                "\n"
+                "Your settings and log files stay on your computer only.\n"
+                "\n"
+                "You can read the full Terms and Privacy with the button below."
+            ),
+            (
+                "About Z Mic Studio",
+                f"Version {APP_VERSION_DISPLAY}\n"
+                "Created and designed by Zameer\n"
+                "\n"
+                "Z Mic Studio turns your phone into a microphone for your computer.\n"
+                "\n"
+                "It is made to work with screen readers such as NVDA, JAWS and\n"
+                "Windows Narrator, and with Google TalkBack on Android."
+            ),
+        ]
 
-        help_text = (
-            "Getting Started\n"
-            "\n"
-            "Step 1. On your computer, install VB-Audio Virtual Cable.\n"
-            "You can get it from www.vb-cable.com\n"
-            "After installing it, restart your computer.\n"
-            "\n"
-            "Step 2. Open Z Mic Studio on your phone.\n"
-            "\n"
-            "Step 3. Go to the Devices tab.\n"
-            "\n"
-            "Step 4. Your phone will appear in the list after a few seconds.\n"
-            "Move to it and press Enter to connect.\n"
-            "\n"
-            "Step 5. Go to the Stream tab and check the status at the top.\n"
-            "\n"
-            "\n"
-            "If You Cannot Hear Anything\n"
-            "\n"
-            "Check these one at a time.\n"
-            "\n"
-            "First, open the Stream tab and read the status at the top.\n"
-            "\n"
-            "Second, open Discord, OBS or Zoom and choose CABLE Output\n"
-            "as the microphone. Do not choose CABLE Input.\n"
-            "\n"
-            "Third, make sure the microphone is not muted.\n"
-            "Press Alt plus M to check.\n"
-            "\n"
-            "Fourth, check that your phone and computer are on the same\n"
-            "Wi-Fi network.\n"
-            "\n"
-            "Fifth, press the Open Log File button below to see what\n"
-            "happened when the app started.\n"
-            "\n"
-            "\n"
-            "If Your Phone Does Not Appear In The List\n"
-            "\n"
-            "Check these one at a time.\n"
-            "\n"
-            "First, make sure the Z Mic Studio app is open on your phone.\n"
-            "\n"
-            "Second, check that your phone and computer are on the same\n"
-            "Wi-Fi network.\n"
-            "\n"
-            "Third, some Wi-Fi networks block devices from finding each\n"
-            "other. A normal home Wi-Fi usually works.\n"
-            "\n"
-            "\n"
-            "Keyboard Shortcuts\n"
-            "\n"
-            "Ctrl plus 1 goes to the Stream tab.\n"
-            "Ctrl plus 2 goes to the Devices tab.\n"
-            "Ctrl plus 3 goes to the Audio Effects tab.\n"
-            "Ctrl plus 4 goes to the Help tab.\n"
-            "Ctrl plus Tab moves to the next tab.\n"
-            "Ctrl plus Shift plus Tab moves to the previous tab.\n"
-            "\n"
-            "Alt plus R starts or stops the audio stream.\n"
-            "Alt plus M mutes or unmutes the microphone.\n"
-            "Alt plus I goes to the audio input selector.\n"
-            "Alt plus N turns noise reduction on or off.\n"
-            "Alt plus E turns studio echo on or off.\n"
-            "Alt plus P turns ping pong delay on or off.\n"
-            "Alt plus H turns headphone monitoring on or off.\n"
-            "Alt plus A opens the About window.\n"
-            "\n"
-            "Ctrl plus Alt plus M mutes or unmutes the microphone from\n"
-            "any program on your computer, even when Z Mic Studio is not\n"
-            "in front.\n"
-            "\n"
-            "Enter presses the button you are on.\n"
-            "Space ticks or unticks the box you are on.\n"
-            "Left arrow makes a slider smaller.\n"
-            "Right arrow makes a slider bigger.\n"
-            "Page Up and Page Down change a slider in bigger steps.\n"
-            "\n"
-            "\n"
-            "Your Privacy\n"
-            "\n"
-            "Your audio only travels between your phone and your computer.\n"
-            "It is never sent to a website or to a server.\n"
-            "This app has no account and no advertising.\n"
-            "You can read the full Terms and Privacy with the button below.\n"
-            "\n"
-            "\n"
-            "About Z Mic Studio\n"
-            "\n"
-            f"Version {APP_VERSION_DISPLAY}\n"
-            "Created and designed by Zameer\n"
-            "\n"
-            "Z Mic Studio turns your phone into a microphone for your computer.\n"
-            "It is made to work with screen readers such as NVDA, JAWS and\n"
-            "Windows Narrator, and with Google TalkBack on Android.\n"
+        lbl_help_head = wx.StaticText(page, wx.ID_ANY, "Help")
+        lbl_help_head.SetFont(lbl_help_head.GetFont().Bold())
+        lbl_help_head.SetName("Help")
+        sizer.Add(lbl_help_head, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+
+        # Section picker
+        self.cmb_help_section = wx.Choice(page, wx.ID_ANY,
+                                          choices=[t for t, _ in self.HELP_SECTIONS])
+        self.cmb_help_section.SetName("Help topic")
+        self.cmb_help_section.SetSelection(0)
+        self.cmb_help_section.Bind(wx.EVT_CHOICE, self.on_help_section_changed)
+        sizer.Add(self.cmb_help_section, 0, wx.EXPAND | wx.ALL, 10)
+
+        self.lbl_help_title = wx.StaticText(page, wx.ID_ANY, self.HELP_SECTIONS[0][0])
+        self.lbl_help_title.SetFont(self.lbl_help_title.GetFont().Bold())
+        self.lbl_help_title.SetName(self.HELP_SECTIONS[0][0])
+        sizer.Add(self.lbl_help_title, 0, wx.LEFT | wx.RIGHT, 10)
+
+        self.txt_help = wx.TextCtrl(
+            page, wx.ID_ANY, value=self.HELP_SECTIONS[0][1],
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP | wx.HSCROLL
         )
+        self.txt_help.SetBackgroundColour(wx.Colour(250, 250, 250))
+        self.txt_help.SetForegroundColour(wx.Colour(20, 20, 20))
+        # The accessible name is reset to the topic title once the tab is built.
+        sizer.Add(self.txt_help, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
-        lbl_help = wx.StaticText(page, wx.ID_ANY, help_text)
-        lbl_help.SetName("Help and instructions")
-        sizer.Add(lbl_help, 0, wx.ALL, 10)
+        # Previous / Next let a screen reader user step through one topic at a time.
+        nav_sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        self.btn_help_prev = wx.Button(page, wx.ID_ANY, "&Previous Topic")
+        self.btn_help_prev.SetName("Previous Help Topic")
+        self.btn_help_prev.Bind(wx.EVT_BUTTON, self.on_help_prev)
+        nav_sizer.Add(self.btn_help_prev, 0, wx.RIGHT, 10)
+
+        self.btn_help_next = wx.Button(page, wx.ID_ANY, "&Next Topic")
+        self.btn_help_next.SetName("Next Help Topic")
+        self.btn_help_next.Bind(wx.EVT_BUTTON, self.on_help_next)
+        nav_sizer.Add(self.btn_help_next, 0, wx.RIGHT, 10)
+
+        sizer.Add(nav_sizer, 0, wx.ALL, 10)
 
         btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         # Terms: always reachable, not only on the first run.
         self.btn_view_terms = wx.Button(page, wx.ID_ANY, "View &Terms and Privacy")
         self.btn_view_terms.SetName("View Terms and Privacy")
-        self.btn_view_terms.SetDefault()
         self._make_button_accessible(self.btn_view_terms, self.on_view_terms)
         btn_sizer.Add(self.btn_view_terms, 0, wx.RIGHT, 10)
 
-        # Diagnostics: the log file is the only way to debug a failed stream.
-        self.btn_open_log = wx.Button(page, wx.ID_ANY, "Open &Log File")
-        self.btn_open_log.SetName("Open Log File")
+        # The log is only needed when something is not working, so it is offered as a
+        # troubleshooting aid rather than as a general feature.
+        self.btn_open_log = wx.Button(page, wx.ID_ANY, "Open &Troubleshooting Log")
+        self.btn_open_log.SetName("Open Troubleshooting Log")
         self.btn_open_log.SetToolTip(f"Opens the Z Mic Studio diagnostic log:\n{LOG_FILE}")
         self._make_button_accessible(self.btn_open_log, self.on_open_log)
         btn_sizer.Add(self.btn_open_log, 0)
 
-        sizer.Add(btn_sizer, 0, wx.ALL, 10)
+        sizer.Add(btn_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
-        lbl_log_path = wx.StaticText(page, wx.ID_ANY, f"Log file: {LOG_FILE}")
-        lbl_log_path.SetForegroundColour(wx.Colour(150, 150, 150))
-        lbl_log_path.SetName(f"Log file location: {LOG_FILE}")
-        sizer.Add(lbl_log_path, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+        self.lbl_log_path = wx.StaticText(
+            page, wx.ID_ANY,
+            "The troubleshooting log records what the app did on this computer. "
+            "It is only useful if something is not working."
+        )
+        self.lbl_log_path.SetForegroundColour(wx.Colour(150, 150, 150))
+        self.lbl_log_path.SetName(self.lbl_log_path.GetLabel())
+        sizer.Add(self.lbl_log_path, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         page.SetSizer(sizer)
+        # Built quietly: nothing is spoken while the app is opening.
+        self.on_help_section_changed(None, announce=False)
         return page
+
+    def on_help_section_changed(self, event, announce=True, force_speak=False):
+        """
+        Shows the chosen help topic and keeps the Previous and Next buttons in step.
+
+        speak defaults to False so the app stays quiet when the tab is built, and so
+        moving through the picker with Up and Down is not read out twice. A screen
+        reader already announces the item the reader moved to, which made every key
+        press say the title twice.
+
+        force_speak is set by the Previous and Next buttons. Pressing a button is
+        silent to a screen reader, so those name the topic they moved to.
+        """
+        index = self.cmb_help_section.GetSelection()
+        if index == wx.NOT_FOUND:
+            return
+        title, body = self.HELP_SECTIONS[index]
+        self.lbl_help_title.SetLabel(title)
+        self.txt_help.SetValue(body)
+        # The name is kept to the topic title on purpose. A long instruction sentence here
+        # is read out every single time focus lands on the help, which drowns the help
+        # itself. The control text is what the reader scrolls through.
+        self.txt_help.SetName(title)
+        self.txt_help.SetInsertionPoint(0)
+
+        count = len(self.HELP_SECTIONS)
+        self.btn_help_prev.Enable(index > 0)
+        self.btn_help_next.Enable(index < count - 1)
+
+        # Spoken only when the Previous or Next buttons asked for it. See the docstring.
+        if announce and force_speak:
+            speak_accessibility(f"Showing help topic: {title}")
+
+    def on_help_next(self, event=None):
+        index = self.cmb_help_section.GetSelection()
+        if index != wx.NOT_FOUND and index < len(self.HELP_SECTIONS) - 1:
+            self.cmb_help_section.SetSelection(index + 1)
+            # Announced, because pressing a button is silent to a screen reader.
+            self.on_help_section_changed(None, announce=True, force_speak=True)
+
+    def on_help_prev(self, event=None):
+        index = self.cmb_help_section.GetSelection()
+        if index != wx.NOT_FOUND and index > 0:
+            self.cmb_help_section.SetSelection(index - 1)
+            # Announced, because pressing a button is silent to a screen reader.
+            self.on_help_section_changed(None, announce=True, force_speak=True)
 
     def on_view_terms(self, event=None):
         """Opens the read only Terms and Privacy window."""
@@ -2708,6 +2848,77 @@ class ZMicStudioFrame(wx.Frame):
         self._update_device_button_states()
         if event:
             event.Skip()
+
+    def _connected_phone_name(self):
+        """Returns the name of the phone currently connected, or None."""
+        for dev in self.discovered_devices_list:
+            if dev.get('status', '').lower() == 'connected':
+                return dev.get('name')
+        return None
+
+    def _rebuild_input_sources(self):
+        """
+        Rebuilds the microphone list.
+
+        The phone only appears once a phone is actually connected. Listing it
+        permanently made it look like a phone was available when none was, so the user
+        could pick it and press Start with nothing on the other end.
+        """
+        if not hasattr(self, 'cmb_input_source') or self.cmb_input_source is None:
+            return
+
+        previous = None
+        sel = self.cmb_input_source.GetSelection()
+        if sel != wx.NOT_FOUND and sel < len(self.input_source_items):
+            previous = self.input_source_items[sel]
+
+        self.input_source_items = []
+        phone_name = self._connected_phone_name()
+        if phone_name:
+            self.input_source_items.append(("phone", None, f"Phone: {phone_name}"))
+        for dev_id, name in self.input_devices:
+            self.input_source_items.append(("pc", dev_id, name))
+
+        if not self.input_source_items:
+            # Nothing to capture from yet. Show a placeholder so the control is not empty.
+            self.cmb_input_source.Clear()
+            self.cmb_input_source.Append("No input device available")
+            self.cmb_input_source.SetSelection(0)
+            self.cmb_input_source.Disable()
+            self.lbl_input_hint.SetLabel(self._input_hint_text())
+            self.lbl_input_hint.SetName(self.lbl_input_hint.GetLabel())
+            log.warning("No input sources available: no connected phone and no PC microphones.")
+            return
+
+        self.cmb_input_source.Enable()
+        self.cmb_input_source.Clear()
+        for _, _, label in self.input_source_items:
+            self.cmb_input_source.Append(label)
+
+        # Keep the user's choice across a rebuild where possible.
+        target = 0
+        if previous is not None:
+            for i, item in enumerate(self.input_source_items):
+                if item[0] == previous[0] and item[1] == previous[1]:
+                    target = i
+                    break
+        self.cmb_input_source.SetSelection(target)
+        self.lbl_input_hint.SetLabel(self._input_hint_text())
+        self.lbl_input_hint.SetName(self.lbl_input_hint.GetLabel())
+
+    def _refresh_input_hint(self):
+        if getattr(self, 'lbl_input_hint', None) is not None:
+            self.lbl_input_hint.SetLabel(self._input_hint_text())
+            self.lbl_input_hint.SetName(self.lbl_input_hint.GetLabel())
+
+    def _input_hint_text(self):
+        if not self.input_source_items:
+            return "No microphone is available. Connect a phone on the Phones tab, " \
+                   "or plug in a USB microphone, then this list will fill up."
+        if self._connected_phone_name() is None:
+            return "Your phone does not appear here until it is connected. " \
+                   "Open the Phones tab to connect it."
+        return "This is what the stream will capture from."
 
     def _update_device_button_states(self):
         """Update Connect, Disconnect, and Forget button states based on selection and device status."""
@@ -2804,6 +3015,9 @@ class ZMicStudioFrame(wx.Frame):
 
             self.discovered_devices_list = devices
             self.lst_phones.Clear()
+            # The phone joins the microphone list only once connected, so rebuild here
+            # rather than at build time.
+            self._rebuild_input_sources()
 
             if not devices:
                 self.lst_phones.Append("Searching for ZMic Studio on local Wi-Fi...")
@@ -2869,10 +3083,20 @@ class ZMicStudioFrame(wx.Frame):
                 return
 
             sel_in = self.cmb_input_source.GetSelection()
-            if sel_in != wx.NOT_FOUND:
-                src_type, dev_id, _ = self.input_source_items[sel_in]
+            src_label = "the selected input"
+            if sel_in != wx.NOT_FOUND and sel_in < len(self.input_source_items):
+                src_type, dev_id, src_label = self.input_source_items[sel_in]
                 self.engine.input_mode = src_type
                 self.engine.input_device_id = dev_id
+            else:
+                # The list is empty or the selection is stale, so there is nothing to
+                # capture from. Say so instead of starting a stream that captures silence.
+                self._show_stopped_status("No input device. Connect a phone or plug in a microphone.")
+                speak_accessibility(
+                    "No input device is available. Connect a phone or plug in a microphone, "
+                    "then press Start Audio Stream again."
+                )
+                return
 
             ok, msg = self.engine.start(PORT_DEFAULT, self.target_cable_id)
             if ok:
@@ -2880,7 +3104,11 @@ class ZMicStudioFrame(wx.Frame):
                 self.btn_stream.SetName("Stop Audio Stream (Alt+R)")
                 self.btn_mute.Enable()
                 self.lbl_status.SetLabel(f"Status: Streaming Active ({msg})")
-                notify_event("phone_connected", "Audio stream started", 1000, 150)
+                # Event name must not be "phone_connected". In Natural Voice mode that
+                # name plays the phone_connected.wav clip, which says "Phone connected"
+                # even when the user started a USB microphone with no phone present.
+                notify_event("stream_started", f"Streaming started. Capturing from {src_label}.",
+                             1000, 150)
             else:
                 self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
                 self.btn_stream.SetName("Start Audio Stream (Alt+R)")
@@ -2894,7 +3122,8 @@ class ZMicStudioFrame(wx.Frame):
             self.btn_stream.SetName("Start Audio Stream (Alt+R)")
             self.btn_mute.Disable()
             self.lbl_status.SetLabel("Status: Stopped")
-            notify_event("phone_disconnected", "Audio stream stopped", 400, 200)
+            # Likewise not "phone_disconnected", for the same reason.
+            notify_event("stream_stopped", "Streaming stopped.", 400, 200)
 
     def _apply_mute_ui(self, muted):
         """Single source of truth for the mute button label, status line and audio cue."""
@@ -2964,7 +3193,7 @@ class ZMicStudioFrame(wx.Frame):
 
     def on_input_source_changed(self, event):
         sel = self.cmb_input_source.GetSelection()
-        if sel != wx.NOT_FOUND:
+        if sel != wx.NOT_FOUND and sel < len(self.input_source_items):
             src_type, dev_id, label = self.input_source_items[sel]
             self.lbl_packets.SetLabel("Audio frames sent: 0")
 
@@ -2995,26 +3224,21 @@ class ZMicStudioFrame(wx.Frame):
                     ok, msg = self.engine.set_input_source(src_type, dev_id)
                     if ok:
                         self.lbl_status.SetLabel(f"Status: Streaming active ({msg})")
-                        notify_event("input_switched", f"Switched to {label}. Audio streaming active.", 1000, 150)
+                        notify_event("input_switched",
+                                     f"Switched to {label}. Audio streaming active.", 1000, 150)
                     else:
                         self.lbl_status.SetLabel(f"Status Error: {msg}")
                         play_audio_cue(400, 250)
                         speak_accessibility(f"Failed to switch mic: {msg}")
                 else:
-                    # Auto-start streaming immediately for selected PC mic
+                    # Stream is stopped, so record the choice and leave it stopped.
+                    # Picking a microphone used to start streaming by itself, which took
+                    # that decision away from the user. They press Start Audio Stream when
+                    # they are ready, and this choice is what it will capture from.
                     self.engine.input_mode = src_type
                     self.engine.input_device_id = dev_id
-                    ok, msg = self.engine.start(PORT_DEFAULT, self.target_cable_id)
-                    if ok:
-                        self.btn_stream.SetLabel("Stop Audio Stream (Alt+&R)")
-                        self.btn_stream.SetName("Stop Audio Stream (Alt+R)")
-                        self.btn_mute.Enable()
-                        self.lbl_status.SetLabel(f"Status: Streaming active (Capturing from {label})")
-                        notify_event("input_switched", f"Switched to {label}. Audio streaming active.", 1000, 150)
-                    else:
-                        self.lbl_status.SetLabel(f"Status Error: {msg}")
-                        play_audio_cue(400, 250)
-                        speak_accessibility(f"Failed to start mic: {msg}")
+                    log.info(f"Input set to {label}. Streaming stays stopped until Start is pressed.")
+                    self._show_stopped_status()
 
     def on_spectral_noise_changed(self, event):
         enabled = self.chk_spectral_noise.GetValue()

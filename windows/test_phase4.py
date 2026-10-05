@@ -398,22 +398,421 @@ def test_stream_tab_ordering():
         check("Stream activity" in frame.lbl_mode.GetLabel(),
               "activity label uses plain wording", f"({frame.lbl_mode.GetLabel()})")
 
-        # Help tab must not use dash-prefixed bullet lines any more.
-        help_text = frame.tab_help.GetChildren()
-        raw_help = ""
-        for c in help_text:
-            try:
-                label = c.GetLabel()
-            except Exception:
-                continue
-            raw_help += label + "\n"
-        check("\n- Ctrl" not in raw_help and "- Ctrl +" not in raw_help,
-              "help no longer uses dash prefixed bullets")
-        for needed in ("Getting Started", "If You Cannot Hear Anything",
-                       "Keyboard Shortcuts", "Your Privacy"):
-            check(needed in raw_help, f"help section present: {needed}")
+        # The help tab is now split into topics, so its wording lives in a read only
+        # TextCtrl rather than a long StaticText block. test_help_sections covers it.
     finally:
         frame.on_close(None)
+    print("  -> Passed!")
+
+
+def test_phone_only_listed_when_connected():
+    """The phone must not sit in the microphone list before it is connected."""
+    print("Test 15: Phone Listed Only When Connected...")
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    frame = Z.PhoneMicFrame()
+    try:
+        # No phone connected yet.
+        frame.discovered_devices_list = []
+        frame._rebuild_input_sources()
+
+        labels = [item[2] for item in frame.input_source_items]
+        check(all("Phone" not in x for x in labels),
+              "phone is absent from the list with no phone connected", f"{labels}")
+        check(all(item[0] == "pc" for item in frame.input_source_items),
+              "only PC microphones are offered when no phone is present")
+        check("does not appear here until it is connected"
+              in frame.lbl_input_hint.GetLabel(),
+              "hint explains why the phone is missing",
+              f"({frame.lbl_input_hint.GetLabel()})")
+
+        # A discovered but not connected phone must still stay out of the list.
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.9", "name": "MyPhone", "status": "Available"}
+        ]
+        frame._rebuild_input_sources()
+        labels = [item[2] for item in frame.input_source_items]
+        check(all("Phone" not in x for x in labels),
+              "a merely discovered phone is not listed yet", f"{labels}")
+
+        # Once connected it appears.
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.9", "name": "MyPhone", "status": "Connected"}
+        ]
+        frame._rebuild_input_sources()
+        labels = [item[2] for item in frame.input_source_items]
+        check(any("Phone" in x for x in labels),
+              "connected phone appears in the list", f"{labels}")
+        check(any("MyPhone" in x for x in labels),
+              "the phone is listed by name, so it is obvious which one", f"{labels}")
+        phone_items = [i for i in frame.input_source_items if i[0] == "phone"]
+        check(phone_items[0][1] is None, "phone entry carries no PC device id")
+
+        # Disconnecting removes it again.
+        frame.discovered_devices_list = []
+        frame._rebuild_input_sources()
+        labels = [item[2] for item in frame.input_source_items]
+        check(all("Phone" not in x for x in labels),
+              "phone leaves the list after disconnect", f"{labels}")
+
+        # With no microphones and no phone, the control explains itself instead of
+        # sitting empty and disabled for no visible reason.
+        saved_devices = frame.input_devices
+        frame.input_devices = []
+        frame.discovered_devices_list = []
+        frame._rebuild_input_sources()
+        check(frame.cmb_input_source.GetCount() == 1,
+              "empty list shows a single explanatory row",
+              f"({frame.cmb_input_source.GetCount()})")
+        check("No input device available" == frame.cmb_input_source.GetString(0),
+              "the row says no input is available")
+        check(frame.cmb_input_source.IsEnabled() is False,
+              "the control is disabled when there is nothing to pick")
+        check("No microphone is available" in frame.lbl_input_hint.GetLabel(),
+              "hint explains the empty list")
+        frame.input_devices = saved_devices
+        frame._rebuild_input_sources()
+        check(frame.cmb_input_source.IsEnabled() is True,
+              "control comes back when a microphone exists")
+
+        # Pressing Start with nothing selected must not start a silent stream.
+        frame.discovered_devices_list = []
+        frame.input_devices = []
+        frame._rebuild_input_sources()
+        frame.on_toggle_stream(None)
+        check(not frame.engine.is_running,
+              "Start does nothing when there is no input device")
+        check(frame.btn_stream.GetLabel().startswith("Start Audio Stream"),
+              "button still offers to start after the refusal",
+              f"({frame.btn_stream.GetLabel()})")
+        check("No input device" in frame.lbl_status.GetLabel(),
+              "status explains that no input is available",
+              f"({frame.lbl_status.GetLabel()})")
+    finally:
+        frame.on_close(None)
+    print("  -> Passed!")
+
+
+def test_stream_cues_do_not_say_phone_connected():
+    """Starting a USB microphone must not play the phone connected clip."""
+    print("Test 16: Stream Cues Stay Neutral...")
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    with open(Z.__file__, encoding="utf-8") as fh:
+        src = fh.read()
+
+    # The bug: notify_event names decide which clip plays in Natural Voice mode, so a
+    # USB stream was announcing "Phone connected" using the phone_connected.wav clip.
+    check('notify_event("phone_connected", "Audio stream started"' not in src,
+          "starting a stream no longer uses the phone_connected event")
+    check('notify_event("phone_disconnected", "Audio stream stopped"' not in src,
+          "stopping a stream no longer uses the phone_disconnected event")
+    check('notify_event("stream_started"' in src,
+          "starting a stream uses a neutral event name")
+    check('notify_event("stream_stopped"' in src,
+          "stopping a stream uses a neutral event name")
+
+    # No bundled clip may make a USB stream sound like a phone event.
+    import os
+    sounds = os.path.join(os.path.dirname(Z.__file__), "sounds")
+    for name in ("stream_started", "stream_stopped"):
+        check(not os.path.exists(os.path.join(sounds, f"{name}.wav")),
+              f"no '{name}' clip claims to be a phone event")
+
+    frame = Z.PhoneMicFrame()
+    try:
+        frame.discovered_devices_list = []
+        frame._rebuild_input_sources()
+        pc = [i for i in frame.input_source_items if i[0] == "pc"]
+        if not pc:
+            check(True, "no PC microphone on this machine, cue check done by source scan")
+        else:
+            # Drive the real handlers rather than replaying notify_event by hand, so the
+            # check fails if the button ever names a phone event again.
+            seen = []
+            original = Z.notify_event
+            Z.notify_event = lambda name, *a, **k: seen.append(name)
+            try:
+                frame.on_toggle_stream(None)
+                started = list(seen)
+                frame.on_toggle_stream(None)
+                stopped = list(seen)
+            finally:
+                Z.notify_event = original
+                if frame.engine.is_running:
+                    frame.engine.stop()
+
+            check("stream_started" in started,
+                  "starting a USB stream emits stream_started", f"{started}")
+            check("stream_stopped" in stopped,
+                  "stopping emits stream_stopped", f"{stopped}")
+            check("phone_connected" not in started and "phone_disconnected" not in started,
+                  "a USB stream never emits a phone event", f"{started + stopped}")
+    finally:
+        frame.on_close(None)
+    print("  -> Passed!")
+
+
+def test_no_auto_start():
+    """The app must not open the microphone on its own."""
+    print("Test 14: No Auto Start On Launch...")
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    with open(Z.__file__, encoding="utf-8") as fh:
+        src = fh.read()
+
+    # The launch path must not call engine.start() on its own.
+    check("wx.CallAfter(self._auto_start_receiver)" not in src,
+          "launch no longer auto-starts the receiver")
+    check("def _auto_start_receiver" not in src,
+          "the auto-start helper is gone")
+    check("Auto-start streaming immediately" not in src,
+          "input switch no longer starts streaming by itself")
+
+    frame = Z.PhoneMicFrame()
+    try:
+        check(not frame.engine.is_running,
+              "engine is stopped when the window appears")
+        check(frame.btn_stream.GetLabel().startswith("Start Audio Stream"),
+              "the button offers to start", f"({frame.btn_stream.GetLabel()})")
+        check(frame.btn_mute.IsEnabled() is False,
+              "mute stays disabled while stopped")
+        check("Not streaming" in frame.lbl_status.GetLabel(),
+              "status says it is not streaming", f"({frame.lbl_status.GetLabel()})")
+
+        # Choosing a different microphone must not open the microphone either.
+        idx = 1 if frame.cmb_input_source.GetCount() > 1 else 0
+        frame.cmb_input_source.SetSelection(idx)
+        frame.on_input_source_changed(None)
+        check(not frame.engine.is_running,
+              "picking a different microphone does not start streaming")
+        check(frame.btn_stream.GetLabel().startswith("Start Audio Stream"),
+              "button still offers to start after picking a microphone",
+              f"({frame.btn_stream.GetLabel()})")
+        check(frame.btn_mute.IsEnabled() is False,
+              "mute stays disabled after picking a microphone")
+
+        # Stopping again must land back in the same waiting state.
+        frame._show_stopped_status()
+        check(frame.btn_stream.GetLabel().startswith("Start Audio Stream"),
+              "stopping returns the button to Start")
+        check(frame.btn_mute.IsEnabled() is False, "stopping disables mute")
+    finally:
+        frame.on_close(None)
+    print("  -> Passed!")
+
+
+def test_sliders_and_tab_shortcuts():
+    """Up and Down must adjust sliders, and Ctrl+Tab must move between tabs."""
+    print("Test 12: Slider Arrows and Tab Shortcuts...")
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    frame = Z.PhoneMicFrame()
+    try:
+        # --- Up and Down must adjust a horizontal slider -------------------
+        sld = frame.sld_volume
+        sld.SetValue(50)
+
+        def press(keycode):
+            evt = wx.KeyEvent(wx.wxEVT_KEY_DOWN)
+            evt.SetKeyCode(keycode)
+            evt.SetEventObject(sld)
+            sld.ProcessEvent(evt)
+            return sld.GetValue()
+
+        before = sld.GetValue()
+        after_up = press(wx.WXK_UP)
+        check(after_up > before, "Up arrow increases a horizontal slider",
+              f"({before} -> {after_up})")
+
+        after_down = press(wx.WXK_DOWN)
+        check(after_down < after_up, "Down arrow decreases a horizontal slider",
+              f"({after_up} -> {after_down})")
+
+        # Clamped at the limits rather than wrapping or going out of range.
+        sld.SetValue(sld.GetMax())
+        check(press(wx.WXK_UP) == sld.GetMax(), "Up is clamped at the maximum")
+        sld.SetValue(sld.GetMin())
+        check(press(wx.WXK_DOWN) == sld.GetMin(), "Down is clamped at the minimum")
+
+        # The value label must follow the arrow keys.
+        sld.SetValue(70)
+        press(wx.WXK_UP)
+        check(f"{sld.GetValue()}%" in frame.lbl_volume.GetLabel(),
+              "label updates when arrows change the value",
+              f"({frame.lbl_volume.GetLabel()})")
+
+        # Every slider in the app must be wired the same way.
+        wired = 0
+        for attr in ("sld_volume", "sld_noise_reduction", "sld_stereo_width",
+                     "sld_echo_delay", "sld_echo_feedback"):
+            candidate = getattr(frame, attr, None)
+            if candidate is None:
+                continue
+            candidate.SetValue(candidate.GetMin() + 1)
+            probe = candidate.GetValue()
+            evt = wx.KeyEvent(wx.wxEVT_KEY_DOWN)
+            evt.SetKeyCode(wx.WXK_UP)
+            evt.SetEventObject(candidate)
+            candidate.ProcessEvent(evt)
+            if candidate.GetValue() != probe:
+                wired += 1
+        check(wired >= 4, "Up arrow works on the other sliders too", f"({wired} of 5)")
+
+        # --- Ctrl+Tab must move between tabs -------------------------------
+        frame.notebook.SetSelection(0)
+        frame.on_next_tab(None)
+        check(frame.notebook.GetSelection() == 1, "next tab moves 0 -> 1")
+        for _ in range(frame.notebook.GetPageCount() - 1):
+            frame.on_next_tab(None)
+        check(frame.notebook.GetSelection() == 0, "next tab wraps around at the end")
+        frame.on_previous_tab(None)
+        check(frame.notebook.GetSelection() == frame.notebook.GetPageCount() - 1,
+              "previous tab wraps around at the start")
+
+        # Registered as real accelerators, not only handled in Python.
+        with open(Z.__file__, encoding="utf-8") as fh:
+            src = fh.read()
+        check("wx.ACCEL_CTRL, wx.WXK_TAB" in src,
+              "Ctrl+Tab is registered as an accelerator")
+        check("wx.ACCEL_CTRL | wx.ACCEL_SHIFT, wx.WXK_TAB" in src,
+              "Ctrl+Shift+Tab is registered as an accelerator")
+    finally:
+        frame.on_close(None)
+    print("  -> Passed!")
+
+
+def test_help_sections():
+    """Help must be split into topics rather than one long block."""
+    print("Test 13: Help Split Into Sections...")
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    frame = Z.PhoneMicFrame()
+    try:
+        sections = frame.HELP_SECTIONS
+        titles = [t for t, _ in sections]
+        check(len(sections) >= 6, "help has at least six sections", f"({len(sections)})")
+
+        for needed in ("Getting Started", "If You Cannot Hear Anything",
+                       "If Your Phone Does Not Appear", "Keyboard Shortcuts",
+                       "Your Privacy", "About Z Mic Studio"):
+            check(needed in titles, f"section present: {needed}")
+
+        check(frame.cmb_help_section.GetCount() == len(sections),
+              "topic picker lists every section")
+
+        frame.cmb_help_section.SetSelection(0)
+        frame.on_help_section_changed(None)
+        check(frame.txt_help.GetValue() == sections[0][1], "first section is shown")
+        check(frame.btn_help_prev.IsEnabled() is False, "Previous disabled on the first")
+        check(frame.btn_help_next.IsEnabled() is True, "Next enabled on the first")
+
+        frame.on_help_next(None)
+        check(frame.cmb_help_section.GetSelection() == 1, "Next moves to section two")
+        check(frame.lbl_help_title.GetLabel() == titles[1], "heading follows the topic")
+
+        frame.cmb_help_section.SetSelection(len(sections) - 1)
+        frame.on_help_section_changed(None)
+        check(frame.btn_help_next.IsEnabled() is False, "Next disabled on the last")
+        frame.on_help_prev(None)
+        check(frame.cmb_help_section.GetSelection() == len(sections) - 2,
+              "Previous steps back")
+
+        # No bullet characters anywhere, because a screen reader reads them out loud.
+        body = "\n".join(b for _, b in sections)
+        import re
+        bullets = re.findall(r"^\s*[-*\u2022\u25cf]", body, re.M)
+        check(not bullets, "no bullet characters in any section", f"{bullets}")
+
+        # Shortcut help must match what the code really does.
+        shortcuts = dict(sections)["Keyboard Shortcuts"]
+        check("Ctrl plus Tab goes to the next tab" in shortcuts,
+              "help documents Ctrl plus Tab")
+        check("Right arrow and Up arrow make the value bigger" in shortcuts,
+              "help says Up arrow increases a slider")
+        check("Left arrow and Down arrow make the value smaller" in shortcuts,
+              "help says Down arrow decreases a slider")
+        check("Up arrow and Down arrow move between them" in shortcuts,
+              "help mentions arrows for the channel mode buttons")
+
+        # The log button is presented as troubleshooting, not as a feature.
+        labels = []
+        for child in frame.tab_help.GetChildren():
+            try:
+                labels.append(child.GetLabel())
+            except Exception:
+                pass
+        check(any("Troubleshooting Log" in x for x in labels),
+              "log button renamed to Troubleshooting Log")
+        check(not any(x.strip() == "Open Log File" for x in labels),
+              "old log button name is gone")
+
+        # Pressing Previous or Next is announced, because a screen reader says nothing
+        # about a button press on its own.
+        spoken = []
+        original = Z.speak_accessibility
+        Z.speak_accessibility = lambda text, *a, **k: spoken.append(text)
+        try:
+            frame.on_help_next()
+            after_next = list(spoken)
+            spoken.clear()
+            frame.cmb_help_section.SetSelection(2)
+            frame.on_help_section_changed(wx.CommandEvent(wx.EVT_CHOICE.typeId, 1))
+            from_picker = list(spoken)
+        finally:
+            Z.speak_accessibility = original
+        check(any("help topic" in s.lower() for s in after_next),
+              "Next button announces the topic it moved to", f"{after_next}")
+        check(not [s for s in from_picker if "help topic" in s.lower()],
+              "picker does not announce the topic again", f"{from_picker}")
+
+        # The help pane must be named with the topic title only. A long instruction sentence
+        # was read out every time focus landed on it, which drowned the help text.
+        for idx, (title, _) in enumerate(frame.HELP_SECTIONS):
+            frame.cmb_help_section.SetSelection(idx)
+            frame.on_help_section_changed(None, announce=False)
+            name = frame.txt_help.GetName()
+            if name != title or "." in name or len(name) > 40:
+                check(False, "help pane is named with the topic title only",
+                      f"(topic={title!r} name={name!r})")
+                break
+        else:
+            check(True, "help pane is named with the topic title only, for every topic")
+
+        # Opening the app must be silent. Building the help tab used to announce
+        # "Showing help topic: Getting Started" before the reader touched anything.
+        # The frame is closed first because building a second one clashes on the
+        # global hotkey.
+        frame.on_close(None)
+        frame = None
+        spoken = []
+        original = Z.speak_accessibility
+        Z.speak_accessibility = lambda text, *a, **k: spoken.append(text)
+        try:
+            fresh = Z.PhoneMicFrame()
+            fresh.on_close(None)
+        finally:
+            Z.speak_accessibility = original
+        check(not [s for s in spoken if "help topic" in s.lower()],
+              "building the app does not announce a help topic", f"{spoken}")
+    finally:
+        if frame is not None:
+            frame.on_close(None)
     print("  -> Passed!")
 
 
@@ -432,6 +831,11 @@ def run_all():
     test_virtual_cable_gate()
     test_terms_and_privacy()
     test_stream_tab_ordering()
+    test_phone_only_listed_when_connected()
+    test_stream_cues_do_not_say_phone_connected()
+    test_no_auto_start()
+    test_sliders_and_tab_shortcuts()
+    test_help_sections()
     print("=" * 60)
     if FAILURES:
         print(f"PHASE 4 FAILED: {len(FAILURES)} check(s) failed")
