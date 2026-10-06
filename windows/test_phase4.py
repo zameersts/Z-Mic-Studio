@@ -585,21 +585,59 @@ def test_about_reachable_and_complete():
 
     frame = Z.PhoneMicFrame()
     try:
-        # A screen reader user does not know shortcuts, so About needs a real control.
-        check(hasattr(frame, "btn_about"),
-              "About is a visible button, not only the Alt+A shortcut")
-        check(frame.btn_about.IsShown() or frame.btn_about.IsEnabled(),
-              "the About button is usable")
-        check(frame.btn_about.GetLabel().replace("&", "") == "About Z Mic Studio",
-              "the button is labelled clearly", f"({frame.btn_about.GetLabel()})")
-        check("About" in frame.btn_about.GetName(),
-              "the button announces what it opens", f"({frame.btn_about.GetName()})")
+        # A screen reader user does not know shortcuts, so About must be a tab they can
+        # reach from the tab strip, not a hidden dialog.
+        check(hasattr(frame, "tab_about"), "About has a tab of its own")
 
-        # It lives on the Help tab, next to Terms, so it is where a user looks for it.
-        found_on_help = any(
-            child is frame.btn_about for child in frame.tab_help.GetChildren()
-        )
-        check(found_on_help, "the About button sits on the Help tab")
+        tab_names = [
+            frame.notebook.GetPageText(i).replace("&", "")
+            for i in range(frame.notebook.GetPageCount())
+        ]
+        check("About" in tab_names,
+              "the About tab appears in the tab strip", f"{tab_names}")
+
+        # Nothing may be hidden off the bottom of a tab. The user reported being unable
+        # to find this, so check the whole page is laid out rather than trusting a name.
+        page = frame.tab_about
+        frame.notebook.SetSelection(frame.notebook.GetPageCount() - 1)
+        frame.Layout()
+
+        texts = []
+        stack = list(page.GetChildren())
+        while stack:
+            c = stack.pop(0)
+            try:
+                stack.extend(c.GetChildren())
+            except Exception:
+                pass
+            if isinstance(c, wx.StaticText):
+                texts.append(c.GetLabel())
+        blob = "\n".join(texts)
+        check("Z Mic Studio" in blob, "the tab names the app")
+        check(Z.APP_VERSION_DISPLAY in blob,
+              "the version is on the page", f"({Z.APP_VERSION_DISPLAY})")
+        check("Zameer" in blob, "the creator is on the page")
+        check("zameer.sstr at gmail dot com" in blob,
+              "the support address is on the page, spelled in words")
+
+        # Every label must also be readable by a screen reader, not just painted.
+        unnamed = []
+        stack = list(page.GetChildren())
+        while stack:
+            c = stack.pop(0)
+            try:
+                stack.extend(c.GetChildren())
+            except Exception:
+                pass
+            if isinstance(c, (wx.StaticText, wx.Button)) and not c.GetName().strip():
+                unnamed.append(c.GetLabel())
+        check(not unnamed,
+              "every control on the About tab has an accessible name", f"{unnamed}")
+
+        # The jump back to Help must work, so the tab is not a dead end.
+        frame.on_go_to_help_tab(None)
+        check(frame.notebook.GetSelection() != frame.notebook.GetPageCount() - 1,
+              "the Go to Help button moves off the About tab")
 
         # The dialog must carry the three things a user actually needs.
         spoken = []

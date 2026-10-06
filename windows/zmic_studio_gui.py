@@ -2217,11 +2217,13 @@ class ZMicStudioFrame(wx.Frame):
         self.tab_devices = self._create_devices_tab(self.notebook)
         self.tab_effects = self._create_effects_tab(self.notebook)
         self.tab_help = self._create_help_tab(self.notebook)
+        self.tab_about = self._create_about_tab(self.notebook)
 
-        self.notebook.AddPage(self.tab_stream, "Stream")
-        self.notebook.AddPage(self.tab_devices, "Devices")
-        self.notebook.AddPage(self.tab_effects, "Audio Effects")
-        self.notebook.AddPage(self.tab_help, "Help & Shortcuts")
+        self.notebook.AddPage(self.tab_stream, "&Stream")
+        self.notebook.AddPage(self.tab_devices, "&Devices")
+        self.notebook.AddPage(self.tab_effects, "Audio &Effects")
+        self.notebook.AddPage(self.tab_help, "&Help and Shortcuts")
+        self.notebook.AddPage(self.tab_about, "A&bout")
 
         main_sizer.Add(self.notebook, 1, wx.EXPAND | wx.ALL, 10)
         panel.SetSizer(main_sizer)
@@ -2536,6 +2538,118 @@ class ZMicStudioFrame(wx.Frame):
         page.SetSizer(sizer)
         return page
 
+    def _create_about_tab(self, parent):
+        """
+        Builds the About tab.
+
+        This is a tab of its own rather than a button on the Help tab, because a button
+        buried at the bottom of a tab is easy to never find. The version number and the
+        support address are the two things a user needs most when something has gone
+        wrong, so they are a single tab press away.
+
+        Everything here is readable text, not a dialog, so a screen reader can read the
+        whole page top to bottom without any hunting.
+        """
+        page = wx.Panel(parent)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        heading = wx.StaticText(page, wx.ID_ANY, APP_NAME)
+        heading.SetFont(heading.GetFont().Bold())
+        heading.SetName(APP_NAME)
+        sizer.Add(heading, 0, wx.ALL, 12)
+
+        # Version. One value that cannot disagree with the running build.
+        self.lbl_about_version = wx.StaticText(page, wx.ID_ANY, f"Version {APP_VERSION_DISPLAY}")
+        self.lbl_about_version.SetName(f"Version {APP_VERSION_DISPLAY}")
+        sizer.Add(self.lbl_about_version, 0, wx.LEFT | wx.RIGHT, 12)
+
+        creator = wx.StaticText(page, wx.ID_ANY, "Created and designed by Zameer.")
+        creator.SetName("Created and designed by Zameer.")
+        sizer.Add(creator, 0, wx.ALL, 12)
+
+        what = wx.StaticText(
+            page, wx.ID_ANY,
+            "Z Mic Studio turns your Android phone into a studio-grade microphone for "
+            "your Windows computer, over your local Wi-Fi network."
+        )
+        what.SetName(
+            "Z Mic Studio turns your Android phone into a studio-grade microphone for "
+            "your Windows computer, over your local Wi-Fi network."
+        )
+        sizer.Add(what, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+
+        access_head = wx.StaticText(page, wx.ID_ANY, "Accessibility")
+        access_head.SetFont(access_head.GetFont().Bold())
+        access_head.SetName("Accessibility")
+        sizer.Add(access_head, 0, wx.LEFT | wx.RIGHT, 12)
+
+        access = wx.StaticText(
+            page, wx.ID_ANY,
+            "This app was built screen-reader first. It works with NVDA on Windows and "
+            "TalkBack on Android."
+        )
+        access.SetName(
+            "This app was built screen-reader first. It works with NVDA on Windows and "
+            "TalkBack on Android."
+        )
+        sizer.Add(access, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+
+        contact_head = wx.StaticText(page, wx.ID_ANY, "Feedback and support")
+        contact_head.SetFont(contact_head.GetFont().Bold())
+        contact_head.SetName("Feedback and support")
+        sizer.Add(contact_head, 0, wx.LEFT | wx.RIGHT, 12)
+
+        # Written as words, not as a raw address. A screen reader reads a bare @ and a
+        # bare dot character by character, which is slow and hard to follow.
+        self.lbl_about_email = wx.StaticText(
+            page, wx.ID_ANY,
+            "Email zameer.sstr at gmail dot com.\n"
+            "Open your email app and write that address there yourself."
+        )
+        self.lbl_about_email.SetName(
+            "Email zameer.sstr at gmail dot com. Open your email app and write that "
+            "address there yourself."
+        )
+        sizer.Add(self.lbl_about_email, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+
+        note = wx.StaticText(
+            page, wx.ID_ANY,
+            "This app cannot send anything by itself. Nothing about you or your "
+            "computer is sent anywhere."
+        )
+        note.SetForegroundColour(wx.Colour(90, 90, 90))
+        note.SetName(
+            "This app cannot send anything by itself. Nothing about you or your "
+            "computer is sent anywhere."
+        )
+        sizer.Add(note, 0, wx.ALL, 12)
+
+        # Terms stay reachable from here too, so a user who came for the version has
+        # not to go back to another tab to read them.
+        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.btn_about_terms = wx.Button(page, wx.ID_ANY, "View &Terms and Privacy")
+        self.btn_about_terms.SetName("View Terms and Privacy")
+        self._make_button_accessible(self.btn_about_terms, self.on_view_terms)
+        btn_sizer.Add(self.btn_about_terms, 0)
+
+        self.btn_about_help = wx.Button(page, wx.ID_ANY, "Go to &Help")
+        self.btn_about_help.SetName("Go to the Help tab")
+        self.btn_about_help.Bind(wx.EVT_BUTTON, self.on_go_to_help_tab)
+        btn_sizer.Add(self.btn_about_help, 0, wx.LEFT, 10)
+
+        sizer.Add(btn_sizer, 0, wx.ALL, 12)
+
+        page.SetSizer(sizer)
+        return page
+
+    def on_go_to_help_tab(self, event=None):
+        """Moves to the Help tab, so the jump back is a button rather than a hunt."""
+        for index in range(self.notebook.GetPageCount()):
+            if self.notebook.GetPage(index) is self.tab_help:
+                self.notebook.SetSelection(index)
+                self.notebook.SetFocus()
+                return
+
     def _create_help_tab(self, parent):
         page = wx.Panel(parent)
         sizer = wx.BoxSizer(wx.VERTICAL)
@@ -2710,15 +2824,9 @@ class ZMicStudioFrame(wx.Frame):
         self._make_button_accessible(self.btn_view_terms, self.on_view_terms)
         btn_sizer.Add(self.btn_view_terms, 0, wx.RIGHT, 10)
 
-        # About: a visible button, not just the Alt+A shortcut. A shortcut is not
-        # discoverable, so a user who needs the version number or the support address
-        # had no way to find them without already knowing the shortcut.
-        self.btn_about = wx.Button(page, wx.ID_ANY, "&About Z Mic Studio")
-        self.btn_about.SetName(
-            "About Z Mic Studio. Shows the version, who made it, and how to send feedback."
-        )
-        self._make_button_accessible(self.btn_about, self.on_about)
-        btn_sizer.Add(self.btn_about, 0, wx.RIGHT, 10)
+        # About has its own tab now, so there is deliberately no About button here.
+        # Two routes to the same screen is one more thing to decide between, and the tab
+        # is always visible in the tab strip.
 
         # The log is only needed when something is not working, so it is offered as a
         # troubleshooting aid rather than as a general feature.
