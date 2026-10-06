@@ -819,12 +819,15 @@ class AudioEngine:
                 log.warning(f"Error closing monitor stream: {e}")
             self.monitor_stream = None
 
+        # Audio health reporting, reset on every stop so each session is judged on its own.
+        self._last_audio_health_log = 0.0
+        self._last_reported_underruns = 0
+
         # Reset jitter buffers safely
         if self.jitter_buffer is not None:
             self.jitter_buffer.reset()
         if self.monitor_jitter_buffer is not None:
             self.monitor_jitter_buffer.reset()
-
         log.info("AudioEngine stopped cleanly.")
         self.on_status_changed("Stopped", "Idle")
 
@@ -1532,6 +1535,34 @@ class AudioEngine:
                         stats = self.jitter_buffer.get_stats()
                         status_detail = f"{detected_mode} (Buf: {stats['buffered_ms']}ms, Loss: {stats['packets_lost']})"
                         self.on_packet_received(packet_count, status_detail)
+
+                        # Audio health, written down. A cut in the voice is either the
+                        # buffer running dry (underrun) or packets going missing on the
+                        # network, and those two have completely different fixes. Without
+                        # this, the log only says audio arrived, which cannot explain a
+                        # cut that is already happened.
+                        now = time.time()
+                        if now - getattr(self, "_last_audio_health_log", 0.0) >= 10.0:
+                            self._last_audio_health_log = now
+                            log.info(
+                                "AUDIO HEALTH: buffered=%.1fms underruns=%d lost=%d "
+                                "overruns=%d trimmed=%.1fms pkts=%d",
+                                stats["buffered_ms"], stats["underruns"],
+                                stats["packets_lost"], stats["overruns"],
+                                stats["trimmed_ms"], stats["packets_received"],
+                            )
+
+                        # An underrun is silence pushed into the output. Log the moment it
+                        # happens, with the buffer depth at that instant, because that is
+                        # the exact cause of the audible cut.
+                        if stats["underruns"] > getattr(self, "_last_reported_underruns", 0):
+                            self._last_reported_underruns = stats["underruns"]
+                            log.warning(
+                                "AUDIO CUT (buffer ran dry): underrun #%d, buffer was "
+                                "%.1fms, packets lost so far %d",
+                                stats["underruns"], stats["buffered_ms"],
+                                stats["packets_lost"],
+                            )
                 except Exception as dsp_err:
                     log.warning(f"Error processing packet DSP: {dsp_err}")
 
