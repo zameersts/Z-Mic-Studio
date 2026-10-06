@@ -2553,78 +2553,38 @@ class ZMicStudioFrame(wx.Frame):
         page = wx.Panel(parent)
         sizer = wx.BoxSizer(wx.VERTICAL)
 
-        heading = wx.StaticText(page, wx.ID_ANY, APP_NAME)
-        heading.SetFont(heading.GetFont().Bold())
-        heading.SetName(APP_NAME)
-        sizer.Add(heading, 0, wx.ALL, 12)
-
-        # Version. One value that cannot disagree with the running build.
-        self.lbl_about_version = wx.StaticText(page, wx.ID_ANY, f"Version {APP_VERSION_DISPLAY}")
-        self.lbl_about_version.SetName(f"Version {APP_VERSION_DISPLAY}")
-        sizer.Add(self.lbl_about_version, 0, wx.LEFT | wx.RIGHT, 12)
-
-        creator = wx.StaticText(page, wx.ID_ANY, "Created and designed by Zameer.")
-        creator.SetName("Created and designed by Zameer.")
-        sizer.Add(creator, 0, wx.ALL, 12)
-
-        what = wx.StaticText(
+        # Read only so it cannot be typed into, but focusable so a screen reader can put the
+        # caret in it and read the text with the arrow keys. Not focusable is why NVDA
+        # never announced this tab's content.
+        #
+        # The body is a read only TextCtrl, not a set of StaticText labels. NVDA skipped the
+        # labels on this tab and read only the buttons, while the Help tab, which uses a
+        # TextCtrl for the very same purpose, reads perfectly. So the control type
+        # matters here, not just the wording.
+        self.txt_about = wx.TextCtrl(
             page, wx.ID_ANY,
-            "Z Mic Studio turns your Android phone into a studio-grade microphone for "
-            "your Windows computer, over your local Wi-Fi network."
+            value=(
+                f"{APP_NAME}\n\n"
+                f"Version {APP_VERSION_DISPLAY}\n\n"
+                "Created and designed by Zameer.\n\n"
+                "Z Mic Studio turns your Android phone into a studio-grade microphone "
+                "for your Windows computer, over your local Wi-Fi network.\n\n"
+                "ACCESSIBILITY\n\n"
+                "This app was built screen-reader first. It works with NVDA on Windows "
+                "and TalkBack on Android.\n\n"
+                "FEEDBACK AND SUPPORT\n\n"
+                "Email: zameer.sstr@gmail.com\n\n"
+                "Open your email app and write that address there yourself.\n\n"
+                "This app cannot send anything by itself. Nothing about you or your "
+                "computer is sent anywhere."
+            ),
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP | wx.HSCROLL
         )
-        what.SetName(
-            "Z Mic Studio turns your Android phone into a studio-grade microphone for "
-            "your Windows computer, over your local Wi-Fi network."
-        )
-        sizer.Add(what, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
-
-        access_head = wx.StaticText(page, wx.ID_ANY, "Accessibility")
-        access_head.SetFont(access_head.GetFont().Bold())
-        access_head.SetName("Accessibility")
-        sizer.Add(access_head, 0, wx.LEFT | wx.RIGHT, 12)
-
-        access = wx.StaticText(
-            page, wx.ID_ANY,
-            "This app was built screen-reader first. It works with NVDA on Windows and "
-            "TalkBack on Android."
-        )
-        access.SetName(
-            "This app was built screen-reader first. It works with NVDA on Windows and "
-            "TalkBack on Android."
-        )
-        sizer.Add(access, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
-
-        contact_head = wx.StaticText(page, wx.ID_ANY, "Feedback and support")
-        contact_head.SetFont(contact_head.GetFont().Bold())
-        contact_head.SetName("Feedback and support")
-        sizer.Add(contact_head, 0, wx.LEFT | wx.RIGHT, 12)
-
-        # Shown on screen as a real address, because a person reading the screen must see
-        # something they can read and copy. The accessible name below spells it in words,
-        # because a screen reader reads a bare @ and a bare dot character by character.
-        # Doing it the other way round put nonsense on the screen, which is worse.
-        self.lbl_about_email = wx.StaticText(
-            page, wx.ID_ANY,
-            "Email: zameer.sstr@gmail.com\n"
-            "Open your email app and write that address there yourself."
-        )
-        self.lbl_about_email.SetName(
-            "Email zameer.sstr at gmail dot com. Open your email app and write that "
-            "address there yourself."
-        )
-        sizer.Add(self.lbl_about_email, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
-
-        note = wx.StaticText(
-            page, wx.ID_ANY,
-            "This app cannot send anything by itself. Nothing about you or your "
-            "computer is sent anywhere."
-        )
-        note.SetForegroundColour(wx.Colour(90, 90, 90))
-        note.SetName(
-            "This app cannot send anything by itself. Nothing about you or your "
-            "computer is sent anywhere."
-        )
-        sizer.Add(note, 0, wx.ALL, 12)
+        self.txt_about.SetBackgroundColour(wx.Colour(250, 250, 250))
+        self.txt_about.SetForegroundColour(wx.Colour(20, 20, 20))
+        # Deliberately no SetName. A custom accessible name replaces what the screen
+        # reader reads out, so naming it would stop the reader reaching the text at all.
+        sizer.Add(self.txt_about, 1, wx.EXPAND | wx.ALL, 12)
 
         # Terms stay reachable from here too, so a user who came for the version has
         # not to go back to another tab to read them.

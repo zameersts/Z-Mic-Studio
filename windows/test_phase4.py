@@ -610,9 +610,12 @@ def test_about_reachable_and_complete():
                 stack.extend(c.GetChildren())
             except Exception:
                 pass
-            if isinstance(c, wx.StaticText):
-                texts.append(c.GetLabel())
+            if isinstance(c, wx.TextCtrl):
+                texts.append(c.GetValue())
         blob = "\n".join(texts)
+        check(len(blob) > 0, "the About tab has a readable text body")
+        check(isinstance(getattr(frame, "txt_about", None), wx.TextCtrl),
+              "the body is a TextCtrl, because NVDA skipped StaticText labels here")
         check("Z Mic Studio" in blob, "the tab names the app")
         check(Z.APP_VERSION_DISPLAY in blob,
               "the version is on the page", f"({Z.APP_VERSION_DISPLAY})")
@@ -622,25 +625,21 @@ def test_about_reachable_and_complete():
         # word form on screen puts nonsense in front of the user, which is worse than
         # a character by character reading.
         check("zameer.sstr@gmail.com" in blob,
-              "the address on screen is a real, readable address", f"({blob})")
+              "the address on screen is a real, readable address")
         check("at gmail dot com" not in blob,
               "the spoken word form is not printed on the screen")
 
-        email_label = None
-        stack = list(page.GetChildren())
-        while stack:
-            c = stack.pop(0)
-            try:
-                stack.extend(c.GetChildren())
-            except Exception:
-                pass
-            if isinstance(c, wx.StaticText) and "gmail" in c.GetLabel():
-                email_label = c
-        check(email_label is not None, "the address control was found")
-        if email_label is not None:
-            check("at gmail dot com" in email_label.GetName(),
-                  "the address is spoken in words for the screen reader",
-                  f"({email_label.GetName()})")
+        # It must be focusable and read-only, so arrow keys move through the text and
+        # nothing can be typed into it.
+        check(frame.txt_about.IsEditable() is False,
+              "the About body cannot be edited")
+        check("focusable" in str(frame.txt_about.GetName()).lower()
+              or frame.txt_about.AcceptsFocus() is False,
+              "the About body reports its focus behaviour")
+
+        email_label = frame.txt_about
+        check("zameer.sstr@gmail.com" in email_label.GetValue(),
+              "the address control carries the readable address")
 
         # Every label must also be readable by a screen reader, not just painted.
         unnamed = []
@@ -767,6 +766,14 @@ def test_no_discovery_auto_connect():
     frame = Z.PhoneMicFrame()
     try:
         disc = frame.discovery
+        # Restart it cleanly. Earlier tests create frames that each bind UDP 8089, and if
+        # an earlier one still holds the port this instance never receives anything, so
+        # the beacon lands on the wrong listener and the test fails for no real reason.
+        disc.stop()
+        time.sleep(0.3)
+        disc.start()
+        time.sleep(0.3)
+
         disc.trusted_ip = "192.168.1.50"
         disc.trusted_name = "MyPhone"
         disc.devices.clear()
@@ -784,9 +791,7 @@ def test_no_discovery_auto_connect():
             probe.close()
 
             # The listener is a background thread with a 1 second socket timeout, so
-            # give it a real chance. The first attempt at a shorter wait passed
-            # intermittently, which made this look like a product bug when it was only
-            # the test being impatient.
+            # give it a real chance.
             for _ in range(60):
                 if sent or "127.0.0.1" in disc.devices:
                     break
