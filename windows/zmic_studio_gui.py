@@ -2710,6 +2710,16 @@ class ZMicStudioFrame(wx.Frame):
         self._make_button_accessible(self.btn_view_terms, self.on_view_terms)
         btn_sizer.Add(self.btn_view_terms, 0, wx.RIGHT, 10)
 
+        # About: a visible button, not just the Alt+A shortcut. A shortcut is not
+        # discoverable, so a user who needs the version number or the support address
+        # had no way to find them without already knowing the shortcut.
+        self.btn_about = wx.Button(page, wx.ID_ANY, "&About Z Mic Studio")
+        self.btn_about.SetName(
+            "About Z Mic Studio. Shows the version, who made it, and how to send feedback."
+        )
+        self._make_button_accessible(self.btn_about, self.on_about)
+        btn_sizer.Add(self.btn_about, 0, wx.RIGHT, 10)
+
         # The log is only needed when something is not working, so it is offered as a
         # troubleshooting aid rather than as a general feature.
         self.btn_open_log = wx.Button(page, wx.ID_ANY, "Open &Troubleshooting Log")
@@ -3355,7 +3365,13 @@ class ZMicStudioFrame(wx.Frame):
             pass
 
     def on_about(self, event=None):
-        """Displays About Dialog with Creator Credits and the support address for Zameer."""
+        """
+        Displays the About dialog: version, creator, and the support address.
+
+        The address is also written out in spoken form, because a screen reader reads a
+        bare email address character by character, which is tedious to hear. "at" and
+        "dot" are spoken instead of @ and .
+        """
         about_text = (
             f"ZMic Studio {APP_VERSION_DISPLAY}\n\n"
             "Created & Designed by Zameer\n\n"

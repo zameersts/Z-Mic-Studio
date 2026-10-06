@@ -575,6 +575,67 @@ def test_stream_cues_do_not_say_phone_connected():
     print("  -> Passed!")
 
 
+def test_about_reachable_and_complete():
+    """About must be findable without knowing a shortcut, and must carry the contact."""
+    print("Test 19: About Is Reachable...")
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    frame = Z.PhoneMicFrame()
+    try:
+        # A screen reader user does not know shortcuts, so About needs a real control.
+        check(hasattr(frame, "btn_about"),
+              "About is a visible button, not only the Alt+A shortcut")
+        check(frame.btn_about.IsShown() or frame.btn_about.IsEnabled(),
+              "the About button is usable")
+        check(frame.btn_about.GetLabel().replace("&", "") == "About Z Mic Studio",
+              "the button is labelled clearly", f"({frame.btn_about.GetLabel()})")
+        check("About" in frame.btn_about.GetName(),
+              "the button announces what it opens", f"({frame.btn_about.GetName()})")
+
+        # It lives on the Help tab, next to Terms, so it is where a user looks for it.
+        found_on_help = any(
+            child is frame.btn_about for child in frame.tab_help.GetChildren()
+        )
+        check(found_on_help, "the About button sits on the Help tab")
+
+        # The dialog must carry the three things a user actually needs.
+        spoken = []
+        dialogs = []
+        original_speak = Z.speak_accessibility
+        original_box = wx.MessageBox
+        Z.speak_accessibility = lambda text, *a, **k: spoken.append(text)
+        wx.MessageBox = lambda message, *a, **k: dialogs.append(message)
+        try:
+            frame.on_about(None)
+        finally:
+            Z.speak_accessibility = original_speak
+            wx.MessageBox = original_box
+
+        check(len(dialogs) == 1, "pressing About opens exactly one dialog", f"({dialogs})")
+        body = dialogs[0] if dialogs else ""
+        check(Z.APP_VERSION_DISPLAY in body,
+              "the dialog shows the version", f"({Z.APP_VERSION_DISPLAY})")
+        check("Zameer" in body, "the dialog names the creator")
+        check("zameer.sstr@gmail.com" in body,
+              "the dialog shows the support address")
+
+        # Spoken text must spell the address out, not read punctuation.
+        check(bool(spoken), "pressing About speaks the dialog")
+        said = " ".join(spoken)
+        check("zameer.sstr at gmail dot com" in said,
+              "the address is spoken in words, not read character by character", f"({said})")
+        check("@" not in said,
+              "no raw @ symbol is spoken, which a screen reader mangles")
+        check("gmail dot com" not in said.replace("gmail dot com", ""),
+              "the address is not spoken twice")
+    finally:
+        frame.on_close(None)
+    print("  -> Passed!")
+
+
 def test_phone_accept_switches_input_to_phone():
     """
     A phone accepting must move a running engine onto the phone input.
