@@ -646,6 +646,9 @@ def test_phone_reconnect_and_manual_switch():
             return True, "ok"
 
         frame.engine.set_input_source = _real_switch
+        # The app is on the USB microphone because the phone went away, not because the user
+        # asked for it. That is the case where capture should return to the phone by itself.
+        frame._user_picked_input = False
         frame.input_source_items = [("pc", usb, "Usb Mic")]
         frame.cmb_input_source.Clear()
         frame.cmb_input_source.Append("Usb Mic")
@@ -692,6 +695,19 @@ def test_phone_reconnect_and_manual_switch():
         check(frame.engine.input_mode == "phone",
               "it follows the phone again when it is selected once more",
               f"(mode={frame.engine.input_mode})")
+
+        # A PC microphone the user chose themselves is left alone even when the phone is
+        # connected. Dragging the capture away from their choice left the list showing a USB
+        # microphone while the voice came from the phone.
+        frame._user_picked_input = True
+        frame.engine.input_mode = "pc"
+        frame.cmb_input_source.SetSelection(1)
+        frame.engine.sock = None
+        frame._follow_phone_back_to_phone_input()
+        check(frame.engine.input_mode == "pc",
+              "it does not override a PC microphone the user picked",
+              f"(mode={frame.engine.input_mode})")
+        frame._user_picked_input = False
 
         # But it never acts while the phone is on the network and not connected, because
         # switching onto a phone that is not ready is what made it disconnect.
@@ -1467,6 +1483,111 @@ def test_phone_link_survives_mic_switch():
         frame.Destroy()
 
 
+def test_user_choice_survives_phone_connect_and_disconnect():
+    """A PC microphone the user picked is neither stolen by a phone nor lost when it leaves."""
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    class FakeInputStream:
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    frame = Z.PhoneMicFrame()
+    engine = frame.engine
+    try:
+        usb = frame.input_devices[0][0] if frame.input_devices else 19
+        frame.input_devices = [(usb, "Microphone (Usb Audio Device)")]
+        engine.is_running = True
+        engine.input_mode = "pc"
+        engine.input_device_id = usb
+        engine.input_stream = FakeInputStream()
+        frame._user_picked_input = True
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Connected"}
+        ]
+
+        # --- A phone connects while the user is on a PC microphone ---
+        frame._handle_discovery_response(True, "MyPhone", "192.168.1.50", 8088)
+
+        check(engine.input_mode == "pc",
+              "a phone connecting does not steal a PC microphone the user picked",
+              f"(mode={engine.input_mode})")
+        check(engine.input_stream is not None,
+              "the PC microphone keeps running")
+        check(engine.sock is not None,
+              "the phone link is held open so the phone does not give up")
+        check(engine._phone_link_held,
+              "the engine records that the phone link is being held")
+
+        labels = [item[2] for item in frame.input_source_items]
+        check(any(lbl.startswith("Phone:") for lbl in labels),
+              "the phone appears in the picker once connected", f"{labels}")
+        sel = frame.cmb_input_source.GetSelection()
+        check(frame.input_source_items[sel][0] == "pc",
+              "the picker still shows the PC microphone the user chose",
+              f"(index={sel})")
+        check("still using" in frame.lbl_status.GetLabel(),
+              "the status says the phone connected without taking over",
+              f"({frame.lbl_status.GetLabel()!r})")
+
+        # --- The phone disconnects while the PC microphone is still the source ---
+        frame.on_disconnect_phone(None)
+
+        check(engine.is_running,
+              "disconnecting the phone does not stop a PC microphone stream")
+        check(engine.input_stream is not None,
+              "the PC microphone stream is still open after the phone left")
+        check(engine.sock is None,
+              "the phone socket is released, it is not just left open")
+        check(not engine._phone_link_held,
+              "the held link flag is cleared on disconnect")
+
+        # The picker drops the phone once discovery reports it as no longer connected. The
+        # frame's list normally shares the discovery's own dictionaries, which disconnect
+        # flips in place; here it is a standalone list, so the update is written out.
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Available"}
+        ]
+        frame._rebuild_input_sources()
+        labels_after = [item[2] for item in frame.input_source_items]
+        check(not any(lbl.startswith("Phone:") for lbl in labels_after),
+              "the disconnected phone disappears from the picker", f"{labels_after}")
+
+        # --- The opposite case: the app chose the PC microphone by itself ---
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Connected"}
+        ]
+        frame.input_source_items = [("phone", None, "Phone: MyPhone"), ("pc", usb, "Usb Mic")]
+        frame.cmb_input_source.Clear()
+        frame.cmb_input_source.Append("Phone: MyPhone")
+        frame.cmb_input_source.Append("Usb Mic")
+        frame.cmb_input_source.SetSelection(0)
+        frame._user_picked_input = True
+
+        # The phone goes away, so the selection lands on the USB microphone on its own.
+        frame.discovered_devices_list = []
+        frame._rebuild_input_sources()
+        check(frame._user_picked_input is False,
+              "a PC microphone the app fell back to is not remembered as the user's choice")
+
+        sel = frame.cmb_input_source.GetSelection()
+        check(sel != wx.NOT_FOUND and frame.input_source_items[sel][0] == "pc",
+              "the fallback put the selection on the PC microphone")
+    finally:
+        try:
+            engine.sock = None
+            engine.udp_thread = None
+            engine.stop()
+        except Exception:
+            pass
+        frame.Destroy()
+
+
 
 def run_all():
     print("=" * 60)
@@ -1488,6 +1609,7 @@ def run_all():
     test_phone_reconnect_and_manual_switch()
     test_about_reachable_and_complete()
     test_phone_link_survives_mic_switch()
+    test_user_choice_survives_phone_connect_and_disconnect()
     test_phone_accept_switches_input_to_phone()
     test_no_discovery_auto_connect()
     test_no_auto_start()

@@ -858,26 +858,8 @@ class AudioEngine:
         log.info("AudioEngine stopped cleanly.")
         self.on_status_changed("Stopped", "Idle")
 
-    def _stop_current_input(self, keep_phone_link=False):
-        """Stops current input capture stream/socket without stopping output.
-
-        keep_phone_link leaves the phone's socket and receiver thread running. The phone
-        treats a missing heartbeat as a dead PC and stops streaming on its own, so tearing
-        the link down just to capture from a PC microphone left the phone silent the moment
-        the user switched back, with the PC still reporting the phone as connected. Keeping
-        the socket open costs a few kilobytes of discarded audio and keeps the phone alive.
-        """
-        if keep_phone_link and self._phone_link_held and self.sock and self.connected_phone_addr:
-            log.info("Keeping the phone's audio link open so its heartbeat is still answered.")
-            if self.input_stream:
-                try:
-                    self.input_stream.stop()
-                    self.input_stream.close()
-                except Exception as e:
-                    log.warning(f"Error closing PC mic stream: {e}")
-                self.input_stream = None
-            return
-
+    def _release_phone_link(self):
+        """Tears down only the phone side: socket, receiver thread, and the phone's address."""
         self._send_stop_to_phone()
         self.connected_phone_addr = None
 
@@ -896,6 +878,74 @@ class AudioEngine:
             self.udp_thread = None
 
         self._phone_link_held = False
+
+    def release_phone_link(self):
+        """Drops the phone connection while local capture carries on.
+
+        Disconnecting the phone used to stop the whole engine, so a user capturing from a PC
+        microphone lost their stream because a phone they were not even using went away.
+        """
+        if not (self.sock or self._phone_link_held or self.connected_phone_addr):
+            return
+        log.info("Releasing the phone's audio link; local capture continues.")
+        self._release_phone_link()
+
+    def hold_phone_link(self):
+        """Brings the phone's socket up without making it the capture source.
+
+        Used when a phone connects while the user has chosen a PC microphone. The phone has
+        to be receiving something from the PC, otherwise it decides the PC has gone and stops
+        streaming, and then it cannot be switched to when it is finally wanted.
+        """
+        if self.input_mode == "phone":
+            return False
+        if self.sock and self.connected_phone_addr and \
+                self.udp_thread and self.udp_thread.is_alive():
+            return False
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+            except Exception:
+                pass
+            sock.bind(("0.0.0.0", self.port))
+            sock.settimeout(0.5)
+            self.sock = sock
+            self.udp_thread = threading.Thread(target=self._udp_receiver_loop, daemon=True)
+            self.udp_thread.start()
+            self._phone_link_held = True
+            log.info(f"Phone link held open on port {self.port} without taking over capture.")
+            return True
+        except Exception as e:
+            self.sock = None
+            log.warning(f"Could not hold the phone link open: {e}")
+            return False
+
+    def input_device_name(self):
+        """Human readable name of whatever is actually capturing right now."""
+        if self.input_mode == "phone":
+            addr = self.connected_phone_addr
+            return f"the phone at {addr[0]}" if addr else "the phone"
+        if self.input_device_id is None:
+            return "the PC microphone"
+        try:
+            return sd.query_devices(self.input_device_id).get("name", "the PC microphone")
+        except Exception:
+            return "the PC microphone"
+
+    def _stop_current_input(self, keep_phone_link=False):
+        """Stops current input capture stream/socket without stopping output.
+
+        keep_phone_link leaves the phone's socket and receiver thread running. The phone
+        treats a missing heartbeat as a dead PC and stops streaming on its own, so tearing
+        the link down just to capture from a PC microphone left the phone silent the moment
+        the user switched back, with the PC still reporting the phone as connected. Keeping
+        the socket open costs a few kilobytes of discarded audio and keeps the phone alive.
+        """
+        if keep_phone_link and self._phone_link_held and self.sock and self.connected_phone_addr:
+            log.info("Keeping the phone's audio link open so its heartbeat is still answered.")
+        else:
+            self._release_phone_link()
 
         if self.input_stream:
             try:
@@ -2177,6 +2227,14 @@ class ZMicStudioFrame(wx.Frame):
             self.target_cable_name = "CABLE Input (Not detected)"
         self.input_devices = get_input_devices()
         self.discovered_devices_list = []
+        # True when the current input was picked by the user rather than chosen for them.
+        # Connecting a phone must not drag a deliberately chosen PC microphone off the list,
+        # but when the phone drops and the app falls back to a PC microphone by itself, the
+        # choice was not the user's and capture should return to the phone on reconnect.
+        self._user_picked_input = False
+        # Set while the app moves the picker itself, so the change handler can tell an
+        # automatic switch apart from the user choosing something.
+        self._suppress_input_pick_mark = False
         self.discovery = PhoneDiscovery(self._on_discovery_device_list, self._on_discovery_connection_response)
 
         self._build_ui()
@@ -3121,6 +3179,14 @@ class ZMicStudioFrame(wx.Frame):
                 if item[0] == previous[0] and item[1] == previous[1]:
                     target = i
                     break
+
+        # When the phone vanishes from the list, the selection lands on a PC microphone
+        # without the user asking. That fallback is not a choice, so it must not be treated
+        # as one, otherwise reconnecting would leave capture stuck on the PC microphone.
+        if previous is not None and previous[0] == "phone" and self.input_source_items:
+            if self.input_source_items[target][0] == "pc":
+                self._user_picked_input = False
+
         self.cmb_input_source.SetSelection(target)
         self.lbl_input_hint.SetLabel(self._input_hint_text())
         self.lbl_input_hint.SetName(self.lbl_input_hint.GetLabel())
@@ -3195,12 +3261,24 @@ class ZMicStudioFrame(wx.Frame):
         name = dev['name']
         self.discovery.disconnect_device(ip)
         if self.engine.is_running:
-            self.engine.stop()
-            self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
-            self.btn_stream.SetName("Start Audio Stream (Alt+R)")
-            self.btn_mute.Disable()
+            # Only tear the stream down if the phone was the thing being captured. A user on
+            # a PC microphone lost their whole stream because a phone they were not using
+            # disconnected.
+            if self.engine.input_mode == "phone":
+                self.engine.stop()
+                self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
+                self.btn_stream.SetName("Start Audio Stream (Alt+R)")
+                self.btn_mute.Disable()
+            else:
+                self.engine.release_phone_link()
         self.lbl_status.SetLabel(f"Status: Disconnected from {name}")
+        if self.engine.is_running:
+            self.lbl_status.SetLabel(
+                f"Status: Disconnected from {name} - still capturing from "
+                f"{self.engine.input_device_name()}")
         notify_event("phone_disconnected", f"Disconnected from {name}", 400, 200)
+        # The phone row has to go away now, or the list offers a phone that is not there.
+        self._rebuild_input_sources()
         self._update_device_button_states()
 
     def on_forget_phone(self, event=None):
@@ -3278,7 +3356,15 @@ class ZMicStudioFrame(wx.Frame):
             # leave input_mode on a PC microphone. The audio receiver thread only runs in
             # phone mode, so without this the PC never acknowledges the phone and the
             # phone reports "PC not responding" right after saying connected.
-            if self.engine.is_running:
+            #
+            # But not when the user picked a PC microphone themselves. Forcing the phone
+            # then left the list showing the USB microphone while the voice came from the
+            # phone, which is the worst kind of bug: the screen disagreed with the ears.
+            # In that case the phone stays listed and reachable, but it does not take over.
+            user_chose_pc = self._user_picked_input and (
+                self.engine.input_mode == "pc" and self.engine.input_stream is not None)
+
+            if self.engine.is_running and not user_chose_pc:
                 swapped_ok, swap_msg = self.engine.set_input_source("phone", None)
                 if not swapped_ok:
                     log.error(f"Could not switch input to the phone: {swap_msg}")
@@ -3288,6 +3374,12 @@ class ZMicStudioFrame(wx.Frame):
                     self._update_device_button_states()
                     return
                 ok, msg = True, swap_msg
+            elif self.engine.is_running:
+                # Keep the PC microphone, but still answer the phone so it stays alive and
+                # can be picked the moment the user wants it.
+                ok, msg = self.engine.hold_phone_link(), "Keeping the selected PC microphone"
+                log.info(f"Phone connected while {self.engine.input_mode} was selected by the "
+                         f"user. Keeping it, and keeping the phone link open.")
             else:
                 self.engine.input_mode = "phone"
                 self.engine.input_device_id = None
@@ -3299,9 +3391,17 @@ class ZMicStudioFrame(wx.Frame):
                 self.btn_mute.Enable()
                 # Set the label only after the engine has started, otherwise start()'s own
                 # status callback overwrites it and the user never sees the confirmation.
-                self.lbl_status.SetLabel(f"Status: Connected to {name} ({ip}) - Streaming Active")
-                log.info(f"Active input device is now {name} over Wi-Fi.")
-                notify_event("phone_connected", f"Connected to {name}", 1000, 150)
+                if user_chose_pc:
+                    self.lbl_status.SetLabel(f"Status: {name} connected - still using "
+                                             f"{self.engine.input_device_name()}")
+                    log.info(f"{name} is connected and available in the input list.")
+                else:
+                    self.lbl_status.SetLabel(f"Status: Connected to {name} ({ip}) - Streaming Active")
+                    log.info(f"Active input device is now {name} over Wi-Fi.")
+                    notify_event("phone_connected", f"Connected to {name}", 1000, 150)
+                # The phone only appears in the picker once a rebuild has run, so the list and
+                # the running input must be refreshed together or they disagree.
+                self._rebuild_input_sources()
             else:
                 self.lbl_status.SetLabel(f"Status Error: {msg}")
                 play_audio_cue(400, 250)
@@ -3325,8 +3425,13 @@ class ZMicStudioFrame(wx.Frame):
         Only done while the stream is running and while a PC microphone is selected, so it
         never interrupts a stream the user set up deliberately, and never overrides a
         choice they are making at that moment.
+
+        A PC microphone the user picked themselves is left alone even here. The list saying
+        one thing while the voice comes from another is worse than having to switch by hand.
         """
         if not self.engine.is_running:
+            return
+        if self._user_picked_input:
             return
         sel = self.cmb_input_source.GetSelection()
         if sel == wx.NOT_FOUND or sel >= len(self.input_source_items):
@@ -3350,7 +3455,11 @@ class ZMicStudioFrame(wx.Frame):
                 log.info("Phone is connected and the stream was on a PC microphone; "
                          "switching the input back to the phone.")
                 self.cmb_input_source.SetSelection(index)
-                self.on_input_source_changed(None)
+                self._suppress_input_pick_mark = True
+                try:
+                    self.on_input_source_changed(None)
+                finally:
+                    self._suppress_input_pick_mark = False
                 return
 
     def _request_phone_audio_if_needed(self, src_type, from_input_switch=False):
@@ -3522,6 +3631,11 @@ class ZMicStudioFrame(wx.Frame):
         sel = self.cmb_input_source.GetSelection()
         if sel != wx.NOT_FOUND and sel < len(self.input_source_items):
             src_type, dev_id, label = self.input_source_items[sel]
+            # Reaching this handler means the user picked it, so a later phone connection must
+            # not silently switch the capture away from it. The app's own switches set the
+            # suppression flag, because a helper changing the picker is not the user choosing.
+            if not self._suppress_input_pick_mark:
+                self._user_picked_input = True
             self.lbl_packets.SetLabel("Audio frames sent: 0")
 
             if src_type == "phone":
