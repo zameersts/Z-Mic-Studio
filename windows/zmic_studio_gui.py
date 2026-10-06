@@ -2599,11 +2599,13 @@ class ZMicStudioFrame(wx.Frame):
         contact_head.SetName("Feedback and support")
         sizer.Add(contact_head, 0, wx.LEFT | wx.RIGHT, 12)
 
-        # Written as words, not as a raw address. A screen reader reads a bare @ and a
-        # bare dot character by character, which is slow and hard to follow.
+        # Shown on screen as a real address, because a person reading the screen must see
+        # something they can read and copy. The accessible name below spells it in words,
+        # because a screen reader reads a bare @ and a bare dot character by character.
+        # Doing it the other way round put nonsense on the screen, which is worse.
         self.lbl_about_email = wx.StaticText(
             page, wx.ID_ANY,
-            "Email zameer.sstr at gmail dot com.\n"
+            "Email: zameer.sstr@gmail.com\n"
             "Open your email app and write that address there yourself."
         )
         self.lbl_about_email.SetName(

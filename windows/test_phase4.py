@@ -617,8 +617,30 @@ def test_about_reachable_and_complete():
         check(Z.APP_VERSION_DISPLAY in blob,
               "the version is on the page", f"({Z.APP_VERSION_DISPLAY})")
         check("Zameer" in blob, "the creator is on the page")
-        check("zameer.sstr at gmail dot com" in blob,
-              "the support address is on the page, spelled in words")
+
+        # The address must be readable on screen AND spoken in words. Showing the
+        # word form on screen puts nonsense in front of the user, which is worse than
+        # a character by character reading.
+        check("zameer.sstr@gmail.com" in blob,
+              "the address on screen is a real, readable address", f"({blob})")
+        check("at gmail dot com" not in blob,
+              "the spoken word form is not printed on the screen")
+
+        email_label = None
+        stack = list(page.GetChildren())
+        while stack:
+            c = stack.pop(0)
+            try:
+                stack.extend(c.GetChildren())
+            except Exception:
+                pass
+            if isinstance(c, wx.StaticText) and "gmail" in c.GetLabel():
+                email_label = c
+        check(email_label is not None, "the address control was found")
+        if email_label is not None:
+            check("at gmail dot com" in email_label.GetName(),
+                  "the address is spoken in words for the screen reader",
+                  f"({email_label.GetName()})")
 
         # Every label must also be readable by a screen reader, not just painted.
         unnamed = []
@@ -761,10 +783,14 @@ def test_no_discovery_auto_connect():
             probe.sendto(b"PM_BEACON:MyPhone:8088", ("127.0.0.1", Z.DISCOVERY_PORT))
             probe.close()
 
-            for _ in range(40):  # wait up to ~2s for the listener to process it
+            # The listener is a background thread with a 1 second socket timeout, so
+            # give it a real chance. The first attempt at a shorter wait passed
+            # intermittently, which made this look like a product bug when it was only
+            # the test being impatient.
+            for _ in range(60):
                 if sent or "127.0.0.1" in disc.devices:
                     break
-                time.sleep(0.05)
+                time.sleep(0.1)
 
             check(not sent,
                   "a trusted phone beacon does not trigger a connect", f"{sent}")
