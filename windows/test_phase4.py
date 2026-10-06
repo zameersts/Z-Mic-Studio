@@ -559,6 +559,92 @@ def test_stream_cues_do_not_say_phone_connected():
     print("  -> Passed!")
 
 
+def test_no_discovery_auto_connect():
+    """Finding a paired phone must not connect or start the stream by itself."""
+    print("Test 17: No Auto Connect On Discovery...")
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    with open(Z.__file__, encoding="utf-8") as fh:
+        src = fh.read()
+
+    # The bug: the discovery listener called connect_device() the moment it saw a trusted
+    # phone beacon, so opening the phone app started the microphone on the PC.
+    check("Auto-reconnecting to trusted phone" not in src,
+          "discovery no longer auto-reconnects to a trusted phone")
+
+    frame = Z.PhoneMicFrame()
+    try:
+        disc = frame.discovery
+        disc.trusted_ip = "192.168.1.50"
+        disc.trusted_name = "MyPhone"
+        disc.devices.clear()
+
+        sent = []
+        original_connect = disc.connect_device
+        disc.connect_device = lambda ip: sent.append(ip)
+        try:
+            # Send a real beacon to the discovery socket, exactly as a phone would.
+            # The handling is inline in the listen loop, so a real packet is the only
+            # honest way to prove nothing connects on its own.
+            import socket
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            probe.sendto(b"PM_BEACON:MyPhone:8088", ("127.0.0.1", Z.DISCOVERY_PORT))
+            probe.close()
+
+            for _ in range(40):  # wait up to ~2s for the listener to process it
+                if sent or "127.0.0.1" in disc.devices:
+                    break
+                time.sleep(0.05)
+
+            check(not sent,
+                  "a trusted phone beacon does not trigger a connect", f"{sent}")
+            check("127.0.0.1" in disc.devices,
+                  "the phone is still recorded as discovered")
+        finally:
+            disc.connect_device = original_connect
+
+        # Starting the stream is the action that now asks the phone to send.
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Available"}
+        ]
+        asked = []
+        frame.discovery.connect_device = lambda ip: asked.append(ip)
+        try:
+            frame._request_phone_audio_if_needed("phone")
+            check(asked == ["192.168.1.50"],
+                  "Start asks the paired phone to begin sending", f"{asked}")
+
+            asked.clear()
+            frame._request_phone_audio_if_needed("pc")
+            check(not asked,
+                  "Start on a PC microphone does not contact any phone", f"{asked}")
+
+            asked.clear()
+            frame.discovered_devices_list = []
+            frame._request_phone_audio_if_needed("phone")
+            check(not asked,
+                  "no phone on the network means no connect attempt", f"{asked}")
+            check("No phone found" in frame.lbl_status.GetLabel(),
+                  "status explains that no phone was found",
+                  f"({frame.lbl_status.GetLabel()})")
+
+            # An already connected phone must not be asked a second time.
+            asked.clear()
+            frame.discovered_devices_list = [
+                {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Connected"}
+            ]
+            frame._request_phone_audio_if_needed("phone")
+            check(not asked, "an already connected phone is not asked again", f"{asked}")
+        finally:
+            disc.connect_device = original_connect
+    finally:
+        frame.on_close(None)
+    print("  -> Passed!")
+
+
 def test_no_auto_start():
     """The app must not open the microphone on its own."""
     print("Test 14: No Auto Start On Launch...")
@@ -833,6 +919,7 @@ def run_all():
     test_stream_tab_ordering()
     test_phone_only_listed_when_connected()
     test_stream_cues_do_not_say_phone_connected()
+    test_no_discovery_auto_connect()
     test_no_auto_start()
     test_sliders_and_tab_shortcuts()
     test_help_sections()

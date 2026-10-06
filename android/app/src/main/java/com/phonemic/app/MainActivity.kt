@@ -191,7 +191,13 @@ class MainActivity : Activity() {
     // Paired device
     // -----------------------------------------------------------------
 
-    private fun updatePairedDeviceUi() {
+    /**
+     * Shows the paired PC name.
+     *
+     * Only the name belongs here. The live link state is already on the status line at the
+     * top, and showing it in both places made a screen reader say Connected twice.
+     */
+    private fun updatePairedDeviceUi(announce: Boolean = true) {
         val prefs = getSharedPreferences(AudioStreamService.PREFS_NAME, Context.MODE_PRIVATE)
         val pairedPc = prefs.getString(AudioStreamService.KEY_TRUSTED_PC, null)
             ?.takeIf { it.isNotBlank() }
@@ -199,8 +205,13 @@ class MainActivity : Activity() {
         if (pairedPc != null) {
             tvPairedDevice.text = getString(R.string.label_paired_device, pairedPc)
             btnForgetPaired.visibility = View.VISIBLE
-            // Paired-device changes must be spoken, not just displayed.
-            tvPairedDevice.announceForAccessibility(getString(R.string.label_paired_device, pairedPc))
+            // Pairing changes are spoken. The live link state is not repeated here,
+            // because the status line above already says Connected or Disconnected.
+            if (announce) {
+                tvPairedDevice.announceForAccessibility(
+                    getString(R.string.label_paired_device, pairedPc)
+                )
+            }
         } else {
             tvPairedDevice.text = getString(R.string.label_no_paired_device)
             btnForgetPaired.visibility = View.GONE
@@ -519,6 +530,10 @@ class MainActivity : Activity() {
     ) {
         isMuted = muted
 
+        // The paired PC box shows the live link state, so it has to follow every change.
+        // Silent, because the status line below already speaks the transition.
+        updatePairedDeviceUi(announce = false)
+
         when (status) {
             AudioStreamService.STATUS_CONNECTING -> {
                 setStreamingUi(true, muteEnabled = false)
@@ -535,7 +550,7 @@ class MainActivity : Activity() {
                 val name = pcName ?: AudioConfig.DEFAULT_PC_NAME
                 val displayFormat = format.ifBlank { getString(R.string.format_mono) }
                 updateStatusText(getString(R.string.status_connected_pc, name, displayFormat))
-                updatePairedDeviceUi()
+                updatePairedDeviceUi(announce = false)
                 dismissRequestDialog()
             }
 
@@ -583,13 +598,17 @@ class MainActivity : Activity() {
 
     private fun setStreamingUi(streaming: Boolean, muteEnabled: Boolean) {
         isStreaming = streaming
-        btnToggleStream.text = getString(
+        btnToggleStream.setText(
             if (streaming) R.string.btn_stop_streaming else R.string.btn_start_streaming
         )
         btnMuteStream.isEnabled = muteEnabled
-        btnMuteStream.text = getString(
-            if (isMuted) R.string.btn_unmute else R.string.btn_mute
-        )
+        btnMuteStream.setText(if (isMuted) R.string.btn_unmute else R.string.btn_mute)
+
+        // Keep the content description equal to the visible label. A description that
+        // never changes makes a screen reader report the same generic sentence no matter
+        // what the button currently does, so the user cannot tell start from stop.
+        btnToggleStream.contentDescription = btnToggleStream.text
+        btnMuteStream.contentDescription = btnMuteStream.text
     }
 
     companion object {

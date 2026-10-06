@@ -47,7 +47,6 @@
             android:minHeight="56dp"
             android:text="@string/btn_start_streaming"
             android:textSize="16sp"
-            android:contentDescription="@string/cd_toggle_stream"
             android:layout_marginBottom="14dp" />
 
         <Button
@@ -58,7 +57,6 @@
             android:text="@string/btn_mute"
             android:textSize="16sp"
             android:enabled="false"
-            android:contentDescription="@string/cd_mute_stream"
             android:layout_marginBottom="14dp" />
 
         <!-- Only visible when the microphone permission is denied; the only recovery route. -->

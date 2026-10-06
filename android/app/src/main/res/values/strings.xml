@@ -82,10 +82,11 @@
     <string name="action_mute">Mute</string>
     <string name="action_unmute">Unmute</string>
 
-    <!-- Content descriptions for non-text elements -->
+    <!-- Content descriptions for non-text elements. The Start/Stop and Mute/Unmute
+         buttons are deliberately absent: their description is set in code to match the
+         label they currently show, because a fixed sentence hid whether the button was
+         currently starting or stopping. -->
     <string name="cd_app_icon">Z Mic Studio application icon</string>
-    <string name="cd_toggle_stream">Start or stop streaming your phone microphone to the PC</string>
-    <string name="cd_mute_stream">Mute or unmute your phone microphone</string>
     <string name="cd_open_settings">Open the system settings for Z Mic Studio</string>
     <string name="cd_view_terms">Read the Terms and Privacy</string>
     <!-- Content descriptions must repeat the visible label first, otherwise TalkBack

@@ -1726,10 +1726,11 @@ class PhoneDiscovery:
 
                     if is_new:
                         log.info(f"Discovered ZMic Studio beacon from {dev_name} ({ip}:{port})")
-                        # Auto-reconnect if device matches trusted paired phone
-                        if self.trusted_ip == ip or (self.trusted_name and self.trusted_name == dev_name):
-                            log.info(f"Auto-reconnecting to trusted phone {dev_name} ({ip})...")
-                            self.connect_device(ip)
+                        # Deliberately no auto-connect here. Connecting on discovery
+                        # meant that opening the phone app started the microphone on
+                        # the PC with nobody having pressed anything. The user starts
+                        # the stream with the Start Audio Stream button, which asks the
+                        # paired phone to send audio.
 
                     if updated:
                         self.on_devices_changed(self.get_device_list())
@@ -3073,6 +3074,33 @@ class ZMicStudioFrame(wx.Frame):
             notify_event("phone_declined", "Connection declined by phone", 400, 250)
             self._update_device_button_states()
 
+    def _request_phone_audio_if_needed(self, src_type):
+        """
+        Asks a paired phone to start sending, when the user chose the phone as input.
+
+        Does nothing for a PC microphone, and does nothing when no phone is on the
+        network, because then the user needs to connect one first from the Phones tab.
+        """
+        if src_type != "phone":
+            return
+        for dev in self.discovered_devices_list:
+            if dev.get('status', '').lower() == 'connected':
+                return
+        for dev in self.discovered_devices_list:
+            ip = dev.get('ip')
+            if not ip:
+                continue
+            log.info(f"Start pressed: requesting audio from paired phone {dev.get('name')} ({ip}).")
+            self.discovery.connect_device(ip)
+            self.lbl_status.SetLabel(
+                f"Status: Connecting to {dev.get('name')}..."
+            )
+            return
+        log.info("Start pressed with phone selected, but no phone was found on the network.")
+        self.lbl_status.SetLabel(
+            "Status: No phone found. Open the Phones tab and press Connect Phone, then try again."
+        )
+
     def on_toggle_stream(self, event):
         if not self.engine.is_running:
             # Defensive only: the startup gate already blocked launch without a cable.
@@ -3103,6 +3131,13 @@ class ZMicStudioFrame(wx.Frame):
                 self.btn_stream.SetLabel("Stop Audio Stream (Alt+&R)")
                 self.btn_stream.SetName("Stop Audio Stream (Alt+R)")
                 self.btn_mute.Enable()
+
+                # Starting a phone stream also asks the phone to begin sending. The
+                # engine only listens, so without this the button would look active while
+                # no audio ever arrived. Auto-connect on discovery was removed, so this
+                # is the single action the user needs.
+                self._request_phone_audio_if_needed(src_type)
+
                 self.lbl_status.SetLabel(f"Status: Streaming Active ({msg})")
                 # Event name must not be "phone_connected". In Natural Voice mode that
                 # name plays the phone_connected.wav clip, which says "Phone connected"
