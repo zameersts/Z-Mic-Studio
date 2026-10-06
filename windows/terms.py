@@ -44,8 +44,11 @@ TERMS_SECTIONS = [
         "and your computer.\n\n"
         "This app has no user account. It has no advertising. It has no tracking "
         "and no analytics.\n\n"
-        "The app checks for updates once a week. That check does not send any "
-        "information about you or your computer.\n\n"
+        "Z Mic Studio does not connect to the internet. It never sends anything "
+        "about you or your computer anywhere. It does not check for updates by "
+        "itself.\n\n"
+        "The only time it opens a web page is to take you to the VB-Audio website, "
+        "and only when it cannot find the virtual audio cable you need.\n\n"
         "Your settings and log files stay on your computer only."
     ),
     (

@@ -296,12 +296,28 @@ def test_terms_and_privacy():
     for topic in ("permission", "another person", "privacy", "responsib"):
         check(topic in body, f"acceptable use mentions '{topic}'")
 
-    # 3. Privacy section must not promise zero network access, because the app checks for
-    #    updates. That promise would be false.
-    check("never contacts any internet server" not in body,
-          "privacy text does not claim zero internet contact")
-    check("checks for updates" in body or "check for updates" in body,
-          "privacy text explains the update check")
+    # 3. Privacy section must not describe a feature the app does not have. It used to
+    #    claim a weekly update check, and no update check exists in the code. Wording that
+    #    describes behaviour the app does not have is a lie to a screen reader user.
+    check("checks for updates once a week" not in body,
+          "privacy text no longer promises a weekly update check")
+    check("does not check for updates by itself" in body,
+          "privacy text states the app does not update itself")
+
+    # The claim must be true, not just present. If an update checker is ever added, this
+    # test is what should force these lines to be rewritten rather than left stale.
+    with open(Z.__file__, encoding="utf-8") as fh:
+        app_src = fh.read()
+    has_update_code = any(token in app_src for token in (
+        "urlopen", "urlretrieve", "requests.get", "http.client", "check_for_update"
+    ))
+    check(not has_update_code,
+          "app really has no update checker, so the wording is honest",
+          f"(found update code: {has_update_code})")
+    check("does not connect to the internet" in body,
+          "privacy text makes the stronger, and true, claim")
+    check("vb-audio website" in body,
+          "privacy text names the one web page the app can open")
 
     # 4. No bullet or star characters that a screen reader would read out loud.
     symbols = [ch for ch in body if ch in ("*", "\u2022", "\u25cf", "\u2023", "\u2043")]
