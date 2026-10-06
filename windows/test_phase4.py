@@ -575,6 +575,90 @@ def test_stream_cues_do_not_say_phone_connected():
     print("  -> Passed!")
 
 
+def test_phone_reconnect_and_manual_switch():
+    """
+    Losing the phone must not leave the stream stuck on a USB microphone, and switching
+    to the phone by hand must actually make audio arrive.
+    """
+    print("Test 20: Phone Reconnect And Manual Switch...")
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    frame = Z.PhoneMicFrame()
+    try:
+        usb = frame.input_devices[0][0] if frame.input_devices else None
+
+        # --- manual switch must ask the phone to send ---
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Available"}
+        ]
+        frame.input_source_items = [("pc", usb, "Usb Mic"), ("phone", None, "Phone")]
+        frame.cmb_input_source.Clear()
+        for _, _, label in frame.input_source_items:
+            frame.cmb_input_source.Append(label)
+        frame.cmb_input_source.SetSelection(1)
+
+        asked = []
+        original = frame.discovery.connect_device
+        frame.discovery.connect_device = lambda ip: asked.append(ip)
+        frame.engine.is_running = True
+        try:
+            frame.engine.set_input_source = lambda *a, **k: (True, "ok")
+            frame.on_input_source_changed(None)
+        finally:
+            frame.discovery.connect_device = original
+            frame.engine.is_running = False
+
+        check(frame.engine.input_mode == "phone",
+              "manual switch moved the engine onto the phone input")
+        check(asked == ["192.168.1.50"],
+              "manual switch also asks the phone to start sending", f"{asked}")
+
+        # --- reconnecting must move the input back by itself ---
+        frame.engine.is_running = True
+        frame.input_source_items = [("pc", usb, "Usb Mic")]
+        frame.cmb_input_source.Clear()
+        frame.cmb_input_source.Append("Usb Mic")
+        frame.cmb_input_source.SetSelection(0)
+        check(frame.engine.input_mode == "pc", "starting state is the USB microphone")
+
+        # The phone comes back and becomes a connected device in the list.
+        frame.input_source_items = [("pc", usb, "Usb Mic"), ("phone", None, "Phone")]
+        frame._follow_phone_back_to_phone_input()
+
+        check(frame.engine.input_mode == "phone",
+              "the input returned to the phone on its own when the phone came back",
+              f"(mode={frame.engine.input_mode})")
+        sel = frame.cmb_input_source.GetSelection()
+        check(frame.input_source_items[sel][0] == "phone",
+              "the picker also shows the phone as selected", f"(index={sel})")
+
+        # Must not fight the user: it only acts when a PC mic was selected.
+        frame.input_source_items = [("phone", None, "Phone"), ("pc", usb, "Usb Mic")]
+        frame.cmb_input_source.Clear()
+        frame.cmb_input_source.Append("Phone")
+        frame.cmb_input_source.Append("Usb Mic")
+        frame.cmb_input_source.SetSelection(1)
+        frame.engine.input_mode = "pc"
+        frame._follow_phone_back_to_phone_input()
+        check(frame.engine.input_mode == "pc",
+              "it does not override a USB choice the user just made")
+
+        # And it must do nothing while the stream is stopped.
+        frame.engine.is_running = False
+        frame.engine.input_mode = "pc"
+        frame.cmb_input_source.SetSelection(1)
+        frame._follow_phone_back_to_phone_input()
+        check(frame.engine.input_mode == "pc",
+              "it does nothing when the stream is not running")
+        frame.engine.is_running = False
+    finally:
+        frame.on_close(None)
+    print("  -> Passed!")
+
+
 def test_about_reachable_and_complete():
     """About must be findable without knowing a shortcut, and must carry the contact."""
     print("Test 19: About Is Reachable...")

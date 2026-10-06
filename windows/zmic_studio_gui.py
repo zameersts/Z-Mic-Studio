@@ -1503,13 +1503,21 @@ class AudioEngine:
                 # the problem, and a stream that arrives in clumps means the phone is
                 # the problem. Those two need opposite fixes, so measure rather than guess.
                 received_at = time.time()
+                # Read defensively. This loop is also driven by tests that build an engine
+                # without going through start(), so the counters may not exist yet. Using
+                # getattr here rather than self._x keeps one missing field from throwing on
+                # every single packet and silently discarding the whole stream.
+                max_gap = getattr(self, "_max_packet_gap_ms", 0.0)
+                big_gaps = getattr(self, "_big_gap_count", 0)
                 previous_arrival = getattr(self, "_last_packet_arrival", None)
                 if previous_arrival is not None:
                     gap_ms = (received_at - previous_arrival) * 1000.0
-                    if gap_ms > self._max_packet_gap_ms:
-                        self._max_packet_gap_ms = gap_ms
+                    if gap_ms > max_gap:
+                        max_gap = gap_ms
                     if gap_ms > 30.0:
-                        self._big_gap_count += 1
+                        big_gaps += 1
+                self._max_packet_gap_ms = max_gap
+                self._big_gap_count = big_gaps
                 self._last_packet_arrival = received_at
 
                 # Protocol v2 audio parsing:
@@ -3169,6 +3177,7 @@ class ZMicStudioFrame(wx.Frame):
             # The phone joins the microphone list only once connected, so rebuild here
             # rather than at build time.
             self._rebuild_input_sources()
+            self._follow_phone_back_to_phone_input()
 
             if not devices:
                 self.lst_phones.Append("Searching for ZMic Studio on local Wi-Fi...")
@@ -3243,6 +3252,37 @@ class ZMicStudioFrame(wx.Frame):
             self.lbl_status.SetLabel(f"Status: Connection declined by {name}")
             notify_event("phone_declined", "Connection declined by phone", 400, 250)
             self._update_device_button_states()
+
+    def _follow_phone_back_to_phone_input(self):
+        """
+        Puts the input back on the phone when the phone reconnects.
+
+        Without this, losing the phone leaves the input sitting on a USB microphone. When
+        the phone comes back it appears in the list but is not selected, so the stream
+        silently keeps capturing the wrong device and the user has to notice and switch by
+        hand.
+
+        Only done while the stream is running and while a PC microphone is selected, so it
+        never interrupts a stream the user set up deliberately, and never overrides a
+        choice they are making at that moment.
+        """
+        if not self.engine.is_running:
+            return
+        sel = self.cmb_input_source.GetSelection()
+        if sel == wx.NOT_FOUND or sel >= len(self.input_source_items):
+            return
+        if self.input_source_items[sel][0] != "pc":
+            return
+        if not any(item[0] == "phone" for item in self.input_source_items):
+            return
+
+        for index, item in enumerate(self.input_source_items):
+            if item[0] == "phone":
+                log.info("Phone is back and the stream was on a PC microphone; "
+                         "switching the input back to the phone.")
+                self.cmb_input_source.SetSelection(index)
+                self.on_input_source_changed(None)
+                return
 
     def _request_phone_audio_if_needed(self, src_type):
         """
@@ -3413,6 +3453,13 @@ class ZMicStudioFrame(wx.Frame):
                     if ok:
                         self.lbl_status.SetLabel("Status: Waiting for phone on Wi-Fi...")
                         speak_accessibility("Switched to Phone. Waiting for Wi-Fi connection.")
+
+                        # Switching the input only makes the PC listen. Without asking the
+                        # phone to send, no audio ever arrives, so the PC sends no
+                        # acknowledgement, the phone concludes the PC is not responding,
+                        # and it drops the connection. Asking here is what makes a manual
+                        # switch to the phone actually work.
+                        self._request_phone_audio_if_needed("phone")
                     else:
                         self.lbl_status.SetLabel(f"Status Error: {msg}")
                         play_audio_cue(400, 250)
