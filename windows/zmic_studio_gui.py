@@ -108,8 +108,27 @@ LEGACY_MONO_PACKET_SIZE = 1920     # 20ms mono
 MIN_LEGACY_PACKET_SIZE = 128
 
 # Jitter buffer tuning (milliseconds)
-JITTER_TARGET_MS = 60
-JITTER_MAX_MS = 100
+#
+# Measured on a real 75 second stream at 48kHz stereo over home Wi-Fi:
+#   14,732 packets arrived, none lost, but the buffer ran dry twice and trimmed twice.
+#   Four audible cuts in 75 seconds, roughly one every 19 seconds.
+#
+# So the network is clean and the cause is uneven arrival timing, which needs room for
+# the bursts.
+#
+# Two measured runs over home Wi-Fi:
+#   60/100ms, 75s: 2 underruns, 2 trims
+#   80/100ms, 39s: 2 underruns, 4 trims
+#
+# Raising the target alone made trimming worse, because the ceiling was left only 20ms
+# above it. Wi-Fi delivers audio in clumps, so with a narrow window the buffer filled to
+# the ceiling and audio was thrown away, which is a cut of its own. The ceiling is now
+# twice the target, so a clump has somewhere to go.
+#
+# This is a deliberate trade. More room means fewer cuts and more delay. Peak latency is
+# the ceiling, so a caller who cannot accept 160ms should lower this value.
+JITTER_TARGET_MS = 80
+JITTER_MAX_MS = 160
 
 # Maximum PC hostname length encoded into a pairing request
 MAX_PC_NAME_BYTES = 32
@@ -822,6 +841,9 @@ class AudioEngine:
         # Audio health reporting, reset on every stop so each session is judged on its own.
         self._last_audio_health_log = 0.0
         self._last_reported_underruns = 0
+        self._max_packet_gap_ms = 0.0
+        self._big_gap_count = 0
+        self._last_packet_arrival = None
 
         # Reset jitter buffers safely
         if self.jitter_buffer is not None:
@@ -1477,6 +1499,19 @@ class AudioEngine:
 
                 packet_count += 1
 
+                # How evenly are packets arriving? A steady stream means the network is
+                # the problem, and a stream that arrives in clumps means the phone is
+                # the problem. Those two need opposite fixes, so measure rather than guess.
+                received_at = time.time()
+                previous_arrival = getattr(self, "_last_packet_arrival", None)
+                if previous_arrival is not None:
+                    gap_ms = (received_at - previous_arrival) * 1000.0
+                    if gap_ms > self._max_packet_gap_ms:
+                        self._max_packet_gap_ms = gap_ms
+                    if gap_ms > 30.0:
+                        self._big_gap_count += 1
+                self._last_packet_arrival = received_at
+
                 # Protocol v2 audio parsing:
                 # [0x50, 0x4D, ver, 0x01, ch, seq_hi, seq_lo, samples_hi, samples_lo, ...PCM]
                 if ptype == TYPE_AUDIO:
@@ -1546,11 +1581,15 @@ class AudioEngine:
                             self._last_audio_health_log = now
                             log.info(
                                 "AUDIO HEALTH: buffered=%.1fms underruns=%d lost=%d "
-                                "overruns=%d trimmed=%.1fms pkts=%d",
+                                "overruns=%d trimmed=%.1fms pkts=%d maxgap=%.0fms "
+                                "gaps>30ms=%d",
                                 stats["buffered_ms"], stats["underruns"],
                                 stats["packets_lost"], stats["overruns"],
                                 stats["trimmed_ms"], stats["packets_received"],
+                                self._max_packet_gap_ms, self._big_gap_count,
                             )
+                            self._max_packet_gap_ms = 0.0
+                            self._big_gap_count = 0
 
                         # An underrun is silence pushed into the output. Log the moment it
                         # happens, with the buffer depth at that instant, because that is
