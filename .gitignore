@@ -9,6 +9,23 @@ local.properties
 *.apk
 *.aab
 
+# Release signing. Losing the keystore means no future release can update an
+# installed app, so these must never reach the repository in any form.
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*passwords*.txt
+android/keystore.properties
+
+# R8 obfuscation mapping. It maps the obfuscated names back to the real ones, so it
+# is as sensitive as the keystore and is needed to debug a release crash.
+android/app/mapping.txt
+android/app/resources.txt
+android/app/*/mapping.txt
+
 # Python
 __pycache__/
 *.py[cod]
