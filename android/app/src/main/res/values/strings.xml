@@ -89,6 +89,18 @@
     <string name="cd_app_icon">Z Mic Studio application icon</string>
     <string name="cd_open_settings">Open the system settings for Z Mic Studio</string>
     <string name="cd_view_terms">Read the Terms and Privacy</string>
+    <string name="btn_about">About Z Mic Studio</string>
+    <!-- Support address is separate from the creator's personal email. -->
+    <string name="support_email">zameer.sstr@gmail.com</string>
+    <string name="support_email_subject">Z Mic Studio feedback</string>
+    <string name="dialog_about_title">About Z Mic Studio</string>
+    <!-- %1$s is the version, read from the installed package. -->
+    <string name="about_body">Version %1$s\n\nCreated and designed by Zameer.\n\nZ Mic Studio turns your Android phone into a microphone for your Windows computer over your local Wi-Fi network.\n\nFeedback and support:\nzameer.sstr@gmail.com\n\nTapping Email Support opens your email app with this address filled in.</string>
+    <string name="btn_email_support">Email Support</string>
+    <string name="error_no_email_app">No email app was found on this phone.</string>
+    <string name="cd_about">About Z Mic Studio. Shows the version, who made it, and how to send feedback.</string>
+    <!-- Spoken so a screen reader user knows the address is a mail app button, not a link. -->
+    <string name="cd_about_email">Email zameer.sstr at gmail dot com. Opens your email app.</string>
     <!-- Content descriptions must repeat the visible label first, otherwise TalkBack
          announces a sentence that the user cannot see on screen. -->
     <string name="cd_forget_paired">Forget Paired PC. Removes the paired computer and needs a new connection</string>

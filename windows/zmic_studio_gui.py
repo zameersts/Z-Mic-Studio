@@ -3355,16 +3355,21 @@ class ZMicStudioFrame(wx.Frame):
             pass
 
     def on_about(self, event=None):
-        """Displays About Dialog with Creator Credits for Zameer."""
+        """Displays About Dialog with Creator Credits and the support address for Zameer."""
         about_text = (
             f"ZMic Studio {APP_VERSION_DISPLAY}\n\n"
             "Created & Designed by Zameer\n\n"
             "An accessible, studio-grade virtual microphone system bridging your smartphone\n"
             "and Windows PC over local Wi-Fi with crystal-clear 48kHz dual-mic stereo sound.\n\n"
             "Engineered with screen-reader first accessibility for NVDA and Google TalkBack.\n"
-            "High-performance DSP with continuous noise reduction and 3D spatial width."
+            "High-performance DSP with continuous noise reduction and 3D spatial width.\n\n"
+            "Feedback and support:\n"
+            "zameer.sstr@gmail.com"
         )
-        speak_accessibility(f"About {APP_NAME}. Version {APP_VERSION_DISPLAY}. Created and Designed by Zameer.")
+        speak_accessibility(
+            f"About {APP_NAME}. Version {APP_VERSION_DISPLAY}. Created and Designed by Zameer. "
+            "For feedback or support, email zameer.sstr at gmail dot com."
+        )
         wx.MessageBox(about_text, "About ZMic Studio", wx.OK | wx.ICON_INFORMATION, self)
 
     def on_allow_speakers_changed(self, event):

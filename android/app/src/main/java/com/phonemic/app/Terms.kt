@@ -53,7 +53,10 @@ object Terms {
                 "itself.\n\n" +
                 "The only time it opens a web page is to take you to the VB-Audio website, " +
                 "and only when it cannot find the virtual audio cable you need.\n\n" +
-                "Your settings and log files stay on your computer only."
+                "Your settings and log files stay on your computer only.\n\n" +
+                "If you want to send feedback or ask for help, you can email " +
+                "zameer.sstr@gmail.com. You have to write that address yourself, " +
+                "because this app cannot send anything by itself."
             ),
         "Third Party Program" to (
             "This app needs VB-Audio Virtual Cable. That program is made by Vincent " +

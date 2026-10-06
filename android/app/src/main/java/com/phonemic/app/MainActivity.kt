@@ -32,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var tvPairedDevice: TextView
     private lateinit var btnForgetPaired: Button
     private lateinit var btnViewTerms: Button
+    private lateinit var btnAbout: Button
 
     private var isStreaming = false
     private var isMuted = false
@@ -96,6 +97,7 @@ class MainActivity : Activity() {
         tvPairedDevice = findViewById(R.id.tvPairedDevice)
         btnForgetPaired = findViewById(R.id.btnForgetPaired)
         btnViewTerms = findViewById(R.id.btnViewTerms)
+        btnAbout = findViewById(R.id.btnAbout)
 
         lastStatusText = tvStatus.text.toString()
         lastStatusTime = System.currentTimeMillis()
@@ -127,6 +129,8 @@ class MainActivity : Activity() {
         btnForgetPaired.setOnClickListener { forgetPairedPc() }
 
         btnViewTerms.setOnClickListener { showTermsDialog() }
+
+        btnAbout.setOnClickListener { showAboutDialog() }
 
         checkPermissionsAndStartDiscovery()
     }
@@ -395,6 +399,59 @@ class MainActivity : Activity() {
             .setView(scroll)
             .setPositiveButton(R.string.btn_close, null)
             .show()
+    }
+
+    /**
+     * Shows who made the app, which version it is, and where to send feedback.
+     *
+     * The version number is read from the installed package rather than repeated in a
+     * string, so it can never drift away from the real build. The email is a dedicated
+     * address, not the creator's personal one.
+     */
+    private fun showAboutDialog() {
+        val version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: ""
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read the package version", e)
+            ""
+        }
+
+        val text = TextView(this).apply {
+            setTextIsSelectable(true)
+            textSize = 15f
+            setTextColor(getColor(R.color.text_primary))
+            setPadding(28, 28, 28, 28)
+            text = getString(R.string.about_body, version)
+        }
+
+        val scroll = android.widget.ScrollView(this).apply {
+            isFillViewport = true
+            addView(text)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_about_title)
+            .setView(scroll)
+            .setPositiveButton(R.string.btn_email_support) { _, _ -> openEmailSupport() }
+            .setNegativeButton(R.string.btn_close, null)
+            .show()
+    }
+
+    private fun openEmailSupport() {
+        val address = getString(R.string.support_email)
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("mailto:$address")
+            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.support_email_subject))
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            // No email app installed. Say so plainly instead of failing silently.
+            Log.e(TAG, "Could not open an email app", e)
+            tvStatus.announceForAccessibility(
+                getString(R.string.status_error, getString(R.string.error_no_email_app))
+            )
+        }
     }
 
     private fun openAppSettings() {

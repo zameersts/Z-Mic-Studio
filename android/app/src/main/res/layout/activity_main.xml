@@ -111,6 +111,18 @@
                 android:text="@string/btn_view_terms"
                 android:textSize="16sp"
                 android:contentDescription="@string/cd_view_terms" />
+
+            <!-- Creator, version and support address. A user needs somewhere to send
+                 feedback, and the version number is what an update check reports. -->
+            <Button
+                android:id="@+id/btnAbout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:layout_marginTop="12dp"
+                android:text="@string/btn_about"
+                android:textSize="16sp"
+                android:contentDescription="@string/cd_about" />
         </LinearLayout>
 
     </LinearLayout>
