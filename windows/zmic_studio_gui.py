@@ -3351,20 +3351,31 @@ class ZMicStudioFrame(wx.Frame):
             # instead of asking for permission again on every session.
             self.engine.set_trusted_phone_ip(ip)
 
-            # The phone is now the input. This has to be an explicit switch, because
-            # engine.start() returns early when the engine is already running and would
-            # leave input_mode on a PC microphone. The audio receiver thread only runs in
-            # phone mode, so without this the PC never acknowledges the phone and the
-            # phone reports "PC not responding" right after saying connected.
+            # What does the picker actually say the user wants? Reading it here is what keeps the
+            # running input and the list from disagreeing. Forcing the phone while the list
+            # showed a USB microphone is what put the phone's voice out of a USB mic.
             #
-            # But not when the user picked a PC microphone themselves. Forcing the phone
-            # then left the list showing the USB microphone while the voice came from the
-            # phone, which is the worst kind of bug: the screen disagreed with the ears.
-            # In that case the phone stays listed and reachable, but it does not take over.
-            user_chose_pc = self._user_picked_input and (
-                self.engine.input_mode == "pc" and self.engine.input_stream is not None)
+            # The switch has to be explicit because engine.start() returns early when the
+            # engine is already running. The audio receiver thread only runs in phone mode,
+            # so without this the PC never acknowledges the phone and the phone reports
+            # "PC not responding" right after saying connected.
+            sel_index = self.cmb_input_source.GetSelection()
+            selected = None
+            if sel_index != wx.NOT_FOUND and sel_index < len(self.input_source_items):
+                selected = self.input_source_items[sel_index]
 
-            if self.engine.is_running and not user_chose_pc:
+            user_wants_pc = (selected is not None and selected[0] == "pc"
+                             and self._user_picked_input)
+
+            if self.engine.is_running and user_wants_pc:
+                # Keep the chosen microphone, but still answer the phone so it stays alive
+                # and can be picked the moment the user wants it.
+                held = self.engine.hold_phone_link()
+                ok, msg = True, ("Keeping the selected PC microphone"
+                                 if held else "PC microphone kept, phone link unavailable")
+                log.info(f"Phone connected while {selected[2]} was selected by the user. "
+                         f"Keeping it, and keeping the phone link open.")
+            elif self.engine.is_running:
                 swapped_ok, swap_msg = self.engine.set_input_source("phone", None)
                 if not swapped_ok:
                     log.error(f"Could not switch input to the phone: {swap_msg}")
@@ -3374,12 +3385,16 @@ class ZMicStudioFrame(wx.Frame):
                     self._update_device_button_states()
                     return
                 ok, msg = True, swap_msg
-            elif self.engine.is_running:
-                # Keep the PC microphone, but still answer the phone so it stays alive and
-                # can be picked the moment the user wants it.
-                ok, msg = self.engine.hold_phone_link(), "Keeping the selected PC microphone"
-                log.info(f"Phone connected while {self.engine.input_mode} was selected by the "
-                         f"user. Keeping it, and keeping the phone link open.")
+            elif user_wants_pc:
+                # Nothing is running yet and the user picked a PC microphone, so that is
+                # what gets started. Starting the phone here instead is what made the voice
+                # come from the phone while the list showed a USB microphone.
+                self.engine.input_mode = "pc"
+                self.engine.input_device_id = selected[1]
+                ok, msg = self.engine.start(port, self.target_cable_id)
+                if ok:
+                    self.engine.hold_phone_link()
+                log.info(f"Starting on {selected[2]}, the microphone the user selected.")
             else:
                 self.engine.input_mode = "phone"
                 self.engine.input_device_id = None
@@ -3391,10 +3406,11 @@ class ZMicStudioFrame(wx.Frame):
                 self.btn_mute.Enable()
                 # Set the label only after the engine has started, otherwise start()'s own
                 # status callback overwrites it and the user never sees the confirmation.
-                if user_chose_pc:
+                if user_wants_pc:
                     self.lbl_status.SetLabel(f"Status: {name} connected - still using "
                                              f"{self.engine.input_device_name()}")
-                    log.info(f"{name} is connected and available in the input list.")
+                    log.info(f"{name} is connected and selectable. Capturing from "
+                             f"{self.engine.input_device_name()}.")
                 else:
                     self.lbl_status.SetLabel(f"Status: Connected to {name} ({ip}) - Streaming Active")
                     log.info(f"Active input device is now {name} over Wi-Fi.")

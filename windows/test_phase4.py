@@ -1588,6 +1588,107 @@ def test_user_choice_survives_phone_connect_and_disconnect():
         frame.Destroy()
 
 
+def test_connect_honours_selection_when_nothing_is_running():
+    """Connecting a phone must not override the picker when the stream has not started."""
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    frame = Z.PhoneMicFrame()
+    engine = frame.engine
+    try:
+        usb = frame.input_devices[0][0] if frame.input_devices else 19
+        frame.input_devices = [(usb, "Microphone (Usb Audio Device)")]
+        frame._rebuild_input_sources()
+
+        # The user chooses the USB microphone and does not press Start.
+        usb_index = next(i for i, item in enumerate(frame.input_source_items)
+                         if item[0] == "pc")
+        frame.cmb_input_source.SetSelection(usb_index)
+        frame.on_input_source_changed(None)
+        check(engine.is_running is False,
+              "nothing is running yet, the user has not pressed Start")
+        check(frame._user_picked_input is True,
+              "the USB microphone counts as the user's choice")
+
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Connected"}
+        ]
+
+        # Everything the real connect would open, faked so no device is touched.
+        started = []
+        real_start = engine.start
+
+        def fake_start(port, device_id):
+            started.append((engine.input_mode, engine.input_device_id))
+            engine.is_running = True
+
+            class FakeStream:
+                def stop(self):
+                    pass
+
+                def close(self):
+                    pass
+
+            engine.input_stream = FakeStream()
+            return True, "Capturing from Microphone (Usb Audio Device)"
+
+        engine.start = fake_start
+        try:
+            frame._handle_discovery_response(True, "MyPhone", "192.168.1.50", 8088)
+        finally:
+            engine.start = real_start
+
+        check(started and started[0][0] == "pc",
+              "the stream starts on the microphone the user selected",
+              f"{started}")
+        check(started and started[0][1] == usb,
+              "it starts on the selected device id", f"{started}")
+        check(engine.input_mode == "pc",
+              "a phone connecting does not move the capture onto the phone",
+              f"(mode={engine.input_mode})")
+        check(engine.sock is not None and engine._phone_link_held,
+              "the phone link is still held open so the phone stays selectable")
+
+        labels = [item[2] for item in frame.input_source_items]
+        check(any(lbl.startswith("Phone:") for lbl in labels),
+              "the phone is offered in the picker", f"{labels}")
+        sel = frame.cmb_input_source.GetSelection()
+        check(frame.input_source_items[sel][0] == "pc",
+              "the picker still shows the USB microphone",
+              f"(index={sel})")
+        check("still using" in frame.lbl_status.GetLabel(),
+              "the status says the chosen microphone is still in use",
+              f"({frame.lbl_status.GetLabel()!r})")
+
+        # And with no user choice recorded, connecting the phone should still take over,
+        # because that is the case where the phone is the only thing there is.
+        engine.is_running = False
+        engine.input_stream = None
+        engine.sock = None
+        engine.udp_thread = None
+        engine._phone_link_held = False
+        engine.input_mode = "phone"
+        frame._user_picked_input = False
+        started.clear()
+        engine.start = fake_start
+        try:
+            frame._handle_discovery_response(True, "MyPhone", "192.168.1.50", 8088)
+        finally:
+            engine.start = real_start
+        check(started and started[0][0] == "phone",
+              "with no microphone chosen, the phone does become the source", f"{started}")
+    finally:
+        try:
+            engine.sock = None
+            engine.udp_thread = None
+            engine.stop()
+        except Exception:
+            pass
+        frame.Destroy()
+
+
 
 def run_all():
     print("=" * 60)
@@ -1610,6 +1711,7 @@ def run_all():
     test_about_reachable_and_complete()
     test_phone_link_survives_mic_switch()
     test_user_choice_survives_phone_connect_and_disconnect()
+    test_connect_honours_selection_when_nothing_is_running()
     test_phone_accept_switches_input_to_phone()
     test_no_discovery_auto_connect()
     test_no_auto_start()
