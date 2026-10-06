@@ -1328,6 +1328,146 @@ def test_help_sections():
     print("  -> Passed!")
 
 
+
+def test_phone_link_survives_mic_switch():
+    """A switch to a PC microphone must not take the phone's audio link down with it.
+
+    Live testing showed the phone stopping its own microphone during a PC mic session while
+    the PC kept listing it as connected, because nothing checked whether audio was still
+    arriving. Switching back to the phone then gave silence forever.
+    """
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    class FakeSock:
+        """Stands in for the UDP socket. Records sends so ACKs can be asserted."""
+
+        def __init__(self, packet=None):
+            self.sent = []
+            self._packet = packet
+            self._done = packet is None
+
+        def recvfrom(self, _bufsize):
+            if self._done:
+                raise OSError("no more packets")
+            self._done = True
+            return self._packet, ("192.168.1.50", 55555)
+
+        def sendto(self, data, addr):
+            self.sent.append((data, addr))
+
+        def settimeout(self, _):
+            pass
+
+        def close(self):
+            pass
+
+    class FakeInputStream:
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    class FakeThread:
+        def is_alive(self):
+            return True
+
+        def join(self, timeout=None):
+            pass
+
+    frame = Z.PhoneMicFrame()
+    engine = frame.engine
+    try:
+        engine.is_running = True
+        engine.input_mode = "phone"
+        engine.input_device_id = None
+        engine.sock = FakeSock()
+        engine.connected_phone_addr = ("192.168.1.50", 55555)
+        engine.udp_thread = FakeThread()
+
+        stops = []
+        engine._send_stop_to_phone = lambda: stops.append("stop-sent")
+        engine._start_input_stream = lambda: (
+            setattr(engine, "input_stream", FakeInputStream())
+            or (True, "Capturing from Usb Mic"))
+
+        # --- STEP 1: leave the phone for a PC microphone ---
+        engine.set_input_source("pc", 19)
+
+        check("stop-sent" not in stops,
+              "switching to a PC microphone does not tell the phone to stop", f"{stops}")
+        check(engine.sock is not None,
+              "the phone's socket stays open so its heartbeat is still answered")
+        check(engine._phone_link_held,
+              "the engine remembers the phone link is being held open")
+
+        # --- STEP 2: come back to the phone, reusing that socket ---
+        # Go through set_input_source, not _start_current_input directly. The live bug was
+        # that the return trip tore the link down anyway and rebound the socket, which is
+        # exactly the path a direct call would have skipped.
+        held_sock = engine.sock
+        engine.input_mode = "pc"
+        engine.input_stream = FakeInputStream()
+        ok, msg = engine.set_input_source("phone", None)
+        check(ok, "switching back to the phone reports success", f"({msg})")
+        check(engine.sock is held_sock,
+              "switching back to the phone reuses the held socket, no second bind",
+              f"(socket reused={engine.sock is held_sock})")
+        check(engine.connected_phone_addr is not None,
+              "the phone is not forgotten on the way back")
+        check("stop-sent" not in stops,
+              "returning to the phone does not tell the phone to stop either", f"{stops}")
+
+        # --- The receiver loop must keep the phone happy while the PC mic is active ---
+        # One real audio packet, delivered through the loop's own socket. The header is
+        # [PM][version][type][channels][seq:2][samples:2], all multi-byte fields big endian.
+        import struct as _struct
+        samples_per_ch = 200
+        packet = (bytes([Z.HEADER_MAGIC[0], Z.HEADER_MAGIC[1], Z.PROTOCOL_VERSION, Z.TYPE_AUDIO])
+                  + bytes([1])
+                  + _struct.pack(">HH", 1, samples_per_ch)
+                  + b"\x01\x02" * samples_per_ch)
+        check(len(packet) == Z.HEADER_SIZE + samples_per_ch * 2,
+              "the test packet matches the size the parser expects",
+              f"(got {len(packet)}, want {Z.HEADER_SIZE + samples_per_ch * 2})")
+        check(Z.parse_audio_packet(packet) is not None,
+              "the test packet parses, so the loop really exercises the audio path")
+
+        written = []
+        engine.jitter_buffer.write = lambda b: written.append(b)
+        engine.input_mode = "pc"
+        engine.sock = FakeSock(packet)
+        engine.connected_phone_addr = ("192.168.1.50", 55555)
+        engine.is_phone_connected_local = True
+
+        try:
+            engine._udp_receiver_loop()
+        except OSError:
+            pass
+        except Exception:
+            pass
+
+        check(not written,
+              "phone audio is not pushed into the output buffer while a PC mic is active",
+              f"(wrote {len(written)} chunks)")
+        check(len(engine.sock.sent) > 0,
+              "the phone is still sent a heartbeat while the PC mic is active",
+              f"(sent {len(engine.sock.sent)})")
+    finally:
+        try:
+            engine.sock = None
+            engine.udp_thread = None
+            engine._send_stop_to_phone = lambda: None
+            engine.stop()
+        except Exception:
+            pass
+        frame.Destroy()
+
+
+
 def run_all():
     print("=" * 60)
     print("ZMIC STUDIO PHASE 4 TEST SUITE")
@@ -1347,6 +1487,7 @@ def run_all():
     test_stream_cues_do_not_say_phone_connected()
     test_phone_reconnect_and_manual_switch()
     test_about_reachable_and_complete()
+    test_phone_link_survives_mic_switch()
     test_phone_accept_switches_input_to_phone()
     test_no_discovery_auto_connect()
     test_no_auto_start()

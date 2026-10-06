@@ -712,6 +712,11 @@ class AudioEngine:
         self.monitor_stream = None
         self.connected_phone_addr = None
 
+        # True while the phone's UDP socket and receiver thread stay alive purely to keep
+        # answering the phone's heartbeat, even though a PC microphone is the active source.
+        # See _stop_current_input for why a swap must not tear that link down.
+        self._phone_link_held = False
+
         # Jitter buffer tuning. target=60ms cushion, hard ceiling=100ms so latency can never
         # balloon to a quarter second before being corrected (which caused audible gaps).
         self.jitter_buffer = AdaptiveJitterBuffer(target_ms=JITTER_TARGET_MS, max_ms=JITTER_MAX_MS)
@@ -853,8 +858,26 @@ class AudioEngine:
         log.info("AudioEngine stopped cleanly.")
         self.on_status_changed("Stopped", "Idle")
 
-    def _stop_current_input(self):
-        """Stops current input capture stream/socket without stopping output."""
+    def _stop_current_input(self, keep_phone_link=False):
+        """Stops current input capture stream/socket without stopping output.
+
+        keep_phone_link leaves the phone's socket and receiver thread running. The phone
+        treats a missing heartbeat as a dead PC and stops streaming on its own, so tearing
+        the link down just to capture from a PC microphone left the phone silent the moment
+        the user switched back, with the PC still reporting the phone as connected. Keeping
+        the socket open costs a few kilobytes of discarded audio and keeps the phone alive.
+        """
+        if keep_phone_link and self._phone_link_held and self.sock and self.connected_phone_addr:
+            log.info("Keeping the phone's audio link open so its heartbeat is still answered.")
+            if self.input_stream:
+                try:
+                    self.input_stream.stop()
+                    self.input_stream.close()
+                except Exception as e:
+                    log.warning(f"Error closing PC mic stream: {e}")
+                self.input_stream = None
+            return
+
         self._send_stop_to_phone()
         self.connected_phone_addr = None
 
@@ -872,6 +895,8 @@ class AudioEngine:
                 log.warning(f"Error joining UDP receiver thread: {e}")
             self.udp_thread = None
 
+        self._phone_link_held = False
+
         if self.input_stream:
             try:
                 self.input_stream.stop()
@@ -883,6 +908,14 @@ class AudioEngine:
     def _start_current_input(self):
         """Starts capture for the currently selected input_mode (phone or pc)."""
         if self.input_mode == "phone":
+            # Coming back from a PC microphone with the link still held: the socket is
+            # already bound and the receiver thread is already answering the phone, so
+            # binding a second socket here would only risk a port clash.
+            if (self._phone_link_held and self.sock
+                    and self.udp_thread and self.udp_thread.is_alive()):
+                log.info("Phone's audio link was kept open; resuming audio from it.")
+                self.on_status_changed("Listening", f"Resuming audio from {self.port}...")
+                return True, f"Resuming phone audio on port {self.port}"
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
@@ -912,11 +945,24 @@ class AudioEngine:
 
     def set_input_source(self, source_type, device_id=None):
         """Seamlessly hot-swaps audio input source between Phone and PC Microphones."""
-        log.info(f"Hot-swapping audio input source: {self.input_mode} -> {source_type} (dev_id={device_id})")
+        previous_mode = self.input_mode
+        log.info(f"Hot-swapping audio input source: {previous_mode} -> {source_type} (dev_id={device_id})")
         self.input_mode = source_type
         self.input_device_id = device_id
         if self.is_running:
-            self._stop_current_input()
+            # Leaving the phone for a PC microphone must not send the phone a stop command
+            # or close its socket. It used to, so the phone shut its microphone down and
+            # never came back, and switching to the phone again produced silence while the
+            # PC still listed the phone as connected.
+            if (previous_mode == "phone" and source_type == "pc"
+                    and self.sock and self.connected_phone_addr):
+                self._phone_link_held = True
+
+            # The link has to be kept in BOTH directions. Tearing it down on the way back to
+            # the phone rebinds the socket, and the phone is left talking to a socket that
+            # no longer knows the session it belongs to.
+            keep_link = bool(self._phone_link_held and self.sock and self.connected_phone_addr)
+            self._stop_current_input(keep_phone_link=keep_link)
             ok, msg = self._start_current_input()
             if not ok:
                 log.error(f"Hot-swap failed: {msg}")
@@ -1327,7 +1373,13 @@ class AudioEngine:
         return out_int16.tobytes()
 
     def _udp_receiver_loop(self):
-        """Listens for incoming UDP audio packets from the phone."""
+        """Listens for incoming UDP audio packets from the phone.
+
+        The loop keeps running while a PC microphone is the active source, provided the phone
+        link is being held open, because its heartbeat ACK is the only thing telling the phone
+        the PC is still there. It used to exit as soon as input_mode stopped being "phone",
+        which silently stopped answering and made the phone release its microphone.
+        """
         sock = self.sock
         if not sock:
             return
@@ -1352,7 +1404,7 @@ class AudioEngine:
                 return True
             return False
 
-        while self.is_running and self.input_mode == "phone":
+        while self.is_running and (self.input_mode == "phone" or self._phone_link_held):
             try:
                 data, addr = sock.recvfrom(65536)
                 if not self.is_running:
@@ -1565,6 +1617,14 @@ class AudioEngine:
                         continue
 
                 try:
+                    # While a PC microphone is the active source, this audio belongs to
+                    # nobody. It is still received and still acknowledged, because the
+                    # phone stops streaming if it stops hearing from us, but pushing it
+                    # into the buffer would fight the PC mic for the same output stream.
+                    if self.input_mode != "phone":
+                        packet_count += 1
+                        continue
+
                     processed_bytes = self._process_dsp(raw_pcm, is_stereo=is_stereo)
 
                     # Route to Adaptive Jitter Buffer for Virtual Audio Cable
