@@ -44,6 +44,8 @@ class WelcomeActivity : Activity() {
 
         setContentView(R.layout.activity_welcome)
 
+        registerBackToExit()
+
         val btnContinue = findViewById<Button>(R.id.btnWelcomeContinue)
         val btnOpenSettings = findViewById<Button>(R.id.btnWelcomeOpenSettings)
         val chkAgree = findViewById<CheckBox>(R.id.chkWelcomeAgree)
@@ -77,12 +79,30 @@ class WelcomeActivity : Activity() {
     }
 
     /**
-     * Prevents silently bypassing onboarding. On Android 13+ the predictive back gesture is used
-     * when available; on older versions onBackPressed is still the correct override target.
+     * Prevents silently bypassing onboarding.
+     *
+     * The old override of onBackPressed() never ran: from Android 13 onwards the system
+     * goes through the back dispatcher and ignores a deprecated onBackPressed override.
+     * This registration is what actually enforces the rule, so pressing Back leaves the
+     * app instead of skipping past the Terms.
+     *
+     * The platform API is used rather than AndroidX so the app keeps its zero dependency
+     * design. Older versions fall back to the default behaviour, which also closes the app
+     * because this screen is the only one in the task.
      */
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        finishAffinity()
+    private fun registerBackToExit() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        try {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT
+            ) {
+                // finish(), not finishAndRemoveTask(): this screen is the only activity in
+                // the task at this point, so closing it leaves the app.
+                finish()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register back handler", e)
+        }
     }
 
     private fun hasAudioPermission(): Boolean =
@@ -182,7 +202,18 @@ class WelcomeActivity : Activity() {
     }
 
     private fun startMainActivityAndFinish() {
-        startActivity(Intent(this, MainActivity::class.java))
+        // CLEAR_TOP reuses an existing MainActivity instead of stacking a second one, and
+        // SINGLE_TOP avoids re-creating the one already on top. finish() then removes this
+        // screen from the stack, which is what makes Back leave the app rather than return
+        // to the Terms.
+        //
+        // finishAndRemoveTask() is deliberately not used here: it destroys the whole task,
+        // including the MainActivity that was just started.
+        startActivity(
+            Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+        )
         finish()
     }
 

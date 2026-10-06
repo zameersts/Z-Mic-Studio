@@ -81,6 +81,8 @@ class MainActivity : Activity() {
         val prefs = getSharedPreferences(AudioStreamService.PREFS_NAME, Context.MODE_PRIVATE)
         if (!prefs.getBoolean(WelcomeActivity.KEY_ONBOARDING_COMPLETED, false)) {
             startActivity(Intent(this, WelcomeActivity::class.java))
+            // finish(), not finishAndRemoveTask(): this would take the Welcome screen down
+            // with it and close the app instead of showing the Terms.
             finish()
             return
         }
