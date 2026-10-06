@@ -3053,7 +3053,27 @@ class ZMicStudioFrame(wx.Frame):
             # Remember the pairing so the UDP receiver auto-approves this phone next time
             # instead of asking for permission again on every session.
             self.engine.set_trusted_phone_ip(ip)
-            ok, msg = self.engine.start(port, self.target_cable_id)
+
+            # The phone is now the input. This has to be an explicit switch, because
+            # engine.start() returns early when the engine is already running and would
+            # leave input_mode on a PC microphone. The audio receiver thread only runs in
+            # phone mode, so without this the PC never acknowledges the phone and the
+            # phone reports "PC not responding" right after saying connected.
+            if self.engine.is_running:
+                swapped_ok, swap_msg = self.engine.set_input_source("phone", None)
+                if not swapped_ok:
+                    log.error(f"Could not switch input to the phone: {swap_msg}")
+                    self.lbl_status.SetLabel(f"Status Error: {swap_msg}")
+                    play_audio_cue(400, 250)
+                    speak_accessibility(f"Could not switch input to the phone: {swap_msg}")
+                    self._update_device_button_states()
+                    return
+                ok, msg = True, swap_msg
+            else:
+                self.engine.input_mode = "phone"
+                self.engine.input_device_id = None
+                ok, msg = self.engine.start(port, self.target_cable_id)
+
             if ok:
                 self.btn_stream.SetLabel("Stop Audio Stream (Alt+&R)")
                 self.btn_stream.SetName("Stop Audio Stream (Alt+R)")

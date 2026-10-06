@@ -559,6 +559,58 @@ def test_stream_cues_do_not_say_phone_connected():
     print("  -> Passed!")
 
 
+def test_phone_accept_switches_input_to_phone():
+    """
+    A phone accepting must move a running engine onto the phone input.
+
+    The bug: engine.start() returns early when the engine is already running, so
+    input_mode stayed on a PC microphone. The audio receiver thread only runs in phone
+    mode, so the PC sent no heartbeat acknowledgements and the phone showed
+    "PC not responding" right after announcing that it had connected.
+    """
+    print("Test 18: Phone Accept Switches A Running Engine...")
+    global _test_app
+    if _test_app is None:
+        _test_app = wx.App(False)
+        wx.DisableAsserts()
+
+    frame = Z.PhoneMicFrame()
+    try:
+        # Pretend the engine is already running and capturing from a PC microphone,
+        # which is the state that used to break.
+        frame.engine.is_running = True
+        frame.engine.input_mode = "pc"
+        frame.engine.input_device_id = frame.input_devices[0][0] if frame.input_devices else None
+
+        frame._handle_discovery_response(True, "MyPhone", "192.168.1.50", 8088)
+
+        check(frame.engine.input_mode == "phone",
+              "engine input switched to the phone after it accepted",
+              f"(mode={frame.engine.input_mode})")
+        check(frame.engine.input_device_id is None,
+              "the PC microphone id was cleared")
+
+        started = []
+        frame.engine._start_current_input = lambda: started.append("ok") or (True, "ok")
+        try:
+            frame.engine.set_input_source("phone", None)
+        finally:
+            pass
+        check("ok" in started,
+              "the phone input stream is actually started, so ACKs can flow", f"{started}")
+
+        # And a PC microphone choice still works the same way.
+        if frame.input_devices:
+            frame.engine.set_input_source("pc", frame.input_devices[0][0])
+            check(frame.engine.input_mode == "pc",
+                  "switching back to a PC microphone still works",
+                  f"(mode={frame.engine.input_mode})")
+    finally:
+        frame.engine.stop()
+        frame.on_close(None)
+    print("  -> Passed!")
+
+
 def test_no_discovery_auto_connect():
     """Finding a paired phone must not connect or start the stream by itself."""
     print("Test 17: No Auto Connect On Discovery...")
@@ -919,6 +971,7 @@ def run_all():
     test_stream_tab_ordering()
     test_phone_only_listed_when_connected()
     test_stream_cues_do_not_say_phone_connected()
+    test_phone_accept_switches_input_to_phone()
     test_no_discovery_auto_connect()
     test_no_auto_start()
     test_sliders_and_tab_shortcuts()
