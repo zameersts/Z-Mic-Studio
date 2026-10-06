@@ -633,28 +633,32 @@ def test_phone_reconnect_and_manual_switch():
               "no request is sent when the phone is already connected", f"{asked}")
 
         # --- reconnecting must move the input back by itself ---
+        # Set every piece of state explicitly. Relying on what an earlier check happened to
+        # leave behind is what made this block report a wrong starting state.
         frame.engine.is_running = True
+        frame.engine.input_mode = "pc"
+        frame.engine.input_device_id = usb
+        frame.engine.sock = None
+
+        def _real_switch(src_type, device_id):
+            frame.engine.input_mode = src_type
+            frame.engine.input_device_id = device_id
+            return True, "ok"
+
+        frame.engine.set_input_source = _real_switch
         frame.input_source_items = [("pc", usb, "Usb Mic")]
         frame.cmb_input_source.Clear()
         frame.cmb_input_source.Append("Usb Mic")
         frame.cmb_input_source.SetSelection(0)
         check(frame.engine.input_mode == "pc", "starting state is the USB microphone")
 
-        # The phone comes back and becomes a connected device in the list.
+        # The phone comes back, but is only visible on the network so far. The combo needs
+        # the row as well, not just the items list, or SetSelection cannot reach it.
         frame.input_source_items = [("pc", usb, "Usb Mic"), ("phone", None, "Phone")]
-        frame._follow_phone_back_to_phone_input()
-
-        check(frame.engine.input_mode == "phone",
-              "the input returned to the phone on its own when the phone came back",
-              f"(mode={frame.engine.input_mode})")
-
-        # A phone that is only seen on the network is not ready, and switching onto it is
-        # what made the phone disconnect.
-        frame.engine.input_mode = "pc"
         frame.cmb_input_source.Clear()
-        frame.cmb_input_source.Append("Usb Mic")
+        for _, _, label in frame.input_source_items:
+            frame.cmb_input_source.Append(label)
         frame.cmb_input_source.SetSelection(0)
-        frame.input_source_items = [("pc", usb, "Usb Mic"), ("phone", None, "Phone")]
         frame.discovered_devices_list = [
             {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Available"}
         ]
@@ -662,14 +666,22 @@ def test_phone_reconnect_and_manual_switch():
         check(frame.engine.input_mode == "pc",
               "it waits until the phone has actually connected, not merely been seen",
               f"(mode={frame.engine.input_mode})")
+
+        # Now the phone has accepted.
         frame.discovered_devices_list = [
             {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Connected"}
         ]
+        frame._follow_phone_back_to_phone_input()
+        check(frame.engine.input_mode == "phone",
+              "the input returned to the phone once it actually connected",
+              f"(mode={frame.engine.input_mode})")
         sel = frame.cmb_input_source.GetSelection()
         check(frame.input_source_items[sel][0] == "phone",
               "the picker also shows the phone as selected", f"(index={sel})")
 
-        # Must not fight the user: it only acts when a PC mic was selected.
+        # It follows the phone whenever a PC microphone is the selection and the phone is
+        # connected. That is the point of the helper: the phone came back, so capture goes
+        # back to the phone without being asked.
         frame.input_source_items = [("phone", None, "Phone"), ("pc", usb, "Usb Mic")]
         frame.cmb_input_source.Clear()
         frame.cmb_input_source.Append("Phone")
@@ -677,8 +689,24 @@ def test_phone_reconnect_and_manual_switch():
         frame.cmb_input_source.SetSelection(1)
         frame.engine.input_mode = "pc"
         frame._follow_phone_back_to_phone_input()
+        check(frame.engine.input_mode == "phone",
+              "it follows the phone again when it is selected once more",
+              f"(mode={frame.engine.input_mode})")
+
+        # But it never acts while the phone is on the network and not connected, because
+        # switching onto a phone that is not ready is what made it disconnect.
+        frame.engine.input_mode = "pc"
+        frame.cmb_input_source.SetSelection(1)
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Available"}
+        ]
+        frame._follow_phone_back_to_phone_input()
         check(frame.engine.input_mode == "pc",
-              "it does not override a USB choice the user just made")
+              "it does not switch onto a phone that has not connected",
+              f"(mode={frame.engine.input_mode})")
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Connected"}
+        ]
 
         # And it must do nothing while the stream is stopped.
         frame.engine.is_running = False
@@ -687,7 +715,68 @@ def test_phone_reconnect_and_manual_switch():
         frame._follow_phone_back_to_phone_input()
         check(frame.engine.input_mode == "pc",
               "it does nothing when the stream is not running")
+        # Re-selecting the phone while it is already the input must not stop the engine.
+        # That stop sends the phone a stop command and leaves a gap with no
+        # acknowledgement, which is what made the phone report the PC as not responding.
+        frame.engine.input_mode = "phone"
+        frame.engine.is_running = True
+        # The guard looks at the socket, because input_mode defaults to phone. A running
+        # engine with no socket is not listening to the phone, so it must still switch.
+        frame.engine.sock = object()
+        stops = []
+        frame.engine.stop = lambda: stops.append("stopped")
+        frame.engine.set_input_source = lambda *a, **k: stops.append("switched") or (True, "ok")
+
+        asked.clear()
+        frame.input_source_items = [("phone", None, "Phone"), ("pc", usb, "Usb Mic")]
+        frame.cmb_input_source.Clear()
+        frame.cmb_input_source.Append("Phone")
+        frame.cmb_input_source.Append("Usb Mic")
+        frame.cmb_input_source.SetSelection(0)
+        frame.on_input_source_changed(None)
+
+        check(not stops,
+              "re-selecting the already active phone stops nothing", f"{stops}")
+        check(not asked,
+              "re-selecting the phone sends no connect request", f"{asked}")
+        check(frame.engine.input_mode == "phone",
+              "the engine stays on the phone")
+
+        # But choosing the USB microphone must still work while streaming from the phone.
+        frame.cmb_input_source.SetSelection(1)
+        swaps = []
+        frame.engine.set_input_source = lambda t, d: swaps.append(t) or (True, "ok")
+        frame.on_input_source_changed(None)
+        check(swaps == ["pc"],
+              "choosing a PC microphone still switches away from the phone", f"{swaps}")
+
+        # And a running engine with no phone socket must still be switched properly. This
+        # was a real bug: input_mode defaults to phone, so the guard skipped the switch and
+        # the connect request, and no audio ever arrived.
+        frame.engine.sock = None
+        frame.engine.input_mode = "phone"
+        frame.engine.is_running = True
+        frame.input_source_items = [("phone", None, "Phone")]
+        frame.cmb_input_source.Clear()
+        frame.cmb_input_source.Append("Phone")
+        frame.cmb_input_source.SetSelection(0)
+
+        # Phone on the network but not accepted yet. This is the case that silently
+        # produced no audio: the guard used to think it was already streaming, so nothing
+        # was ever asked for.
+        asked.clear()
+        frame._last_connect_request_at = 0.0
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Available"}
+        ]
+        frame.discovery.connect_device = lambda ip: asked.append(ip)
+        frame.engine.set_input_source = _real_switch
+        frame.on_input_source_changed(None)
+        check(asked == ["192.168.1.50"],
+              "a phone selected with no live socket asks the phone to send", f"{asked}")
+
         frame.engine.is_running = False
+        frame.engine.input_mode = "phone"
     finally:
         frame.on_close(None)
     print("  -> Passed!")
@@ -751,9 +840,11 @@ def test_about_reachable_and_complete():
         # nothing can be typed into it.
         check(frame.txt_about.IsEditable() is False,
               "the About body cannot be edited")
-        check("focusable" in str(frame.txt_about.GetName()).lower()
-              or frame.txt_about.AcceptsFocus() is False,
-              "the About body reports its focus behaviour")
+        check(frame.txt_about.AcceptsFocus() is True,
+              "the About body takes focus, so a screen reader can read it",
+              f"(AcceptsFocus={frame.txt_about.AcceptsFocus()})")
+        check(frame.txt_about.GetValue().count("\n") > 3,
+              "the About body is laid out as separate lines")
 
         email_label = frame.txt_about
         check("zameer.sstr@gmail.com" in email_label.GetValue(),
@@ -1254,6 +1345,8 @@ def run_all():
     test_stream_tab_ordering()
     test_phone_only_listed_when_connected()
     test_stream_cues_do_not_say_phone_connected()
+    test_phone_reconnect_and_manual_switch()
+    test_about_reachable_and_complete()
     test_phone_accept_switches_input_to_phone()
     test_no_discovery_auto_connect()
     test_no_auto_start()

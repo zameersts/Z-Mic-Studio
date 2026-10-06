@@ -3466,6 +3466,26 @@ class ZMicStudioFrame(wx.Frame):
 
             if src_type == "phone":
                 self.lbl_mode.SetLabel("Stream activity: Waiting for phone")
+
+                # Already listening to the phone. Switching again would stop the engine,
+                # which sends the phone a stop command and leaves a gap with no
+                # acknowledgement. That is what made the phone report the PC as not
+                # responding and disconnect.
+                #
+                # The socket is the honest test here, not input_mode. input_mode defaults
+                # to "phone" on a fresh engine, so a running engine that had never listened
+                # looked like it was already streaming from the phone, the connect request
+                # was skipped, and no audio ever arrived.
+                already_listening = (
+                    self.engine.is_running
+                    and self.engine.input_mode == "phone"
+                    and self.engine.sock is not None
+                )
+                if already_listening:
+                    log.info("Already listening to the phone; nothing to switch.")
+                    self.lbl_status.SetLabel("Status: Streaming from the phone.")
+                    return
+
                 log.info(f"Input device set to {label}.")
                 if self.engine.is_running:
                     # set_input_source performs the switch and reports it honestly. Setting
