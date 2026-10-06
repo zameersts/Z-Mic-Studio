@@ -3276,37 +3276,59 @@ class ZMicStudioFrame(wx.Frame):
         if not any(item[0] == "phone" for item in self.input_source_items):
             return
 
+        # Being seen on the network is not the same as connected. Switching onto a phone
+        # that is not ready is what made the phone drop the connection, so wait until the
+        # phone has actually accepted.
+        if not any(
+            dev.get('status', '').lower() == 'connected'
+            for dev in self.discovered_devices_list
+        ):
+            return
+
         for index, item in enumerate(self.input_source_items):
             if item[0] == "phone":
-                log.info("Phone is back and the stream was on a PC microphone; "
+                log.info("Phone is connected and the stream was on a PC microphone; "
                          "switching the input back to the phone.")
                 self.cmb_input_source.SetSelection(index)
                 self.on_input_source_changed(None)
                 return
 
-    def _request_phone_audio_if_needed(self, src_type):
+    def _request_phone_audio_if_needed(self, src_type, from_input_switch=False):
         """
-        Asks a paired phone to start sending, when the user chose the phone as input.
+        Asks a phone to start sending, when the phone is the chosen input.
 
-        Does nothing for a PC microphone, and does nothing when no phone is on the
-        network, because then the user needs to connect one first from the Phones tab.
+        Switching the input only makes the PC listen. Without this the phone never sends,
+        the PC never acknowledges, and the phone reports that the PC is not responding,
+        which is what made the phone disconnect when the input was switched by hand.
+
+        Does nothing for a PC microphone, and nothing when a phone is already connected.
+        Nothing when a request is already in flight either: asking a second time made the
+        phone see a fresh pairing request while the first was still being accepted, and it
+        dropped the connection instead of starting to send.
         """
         if src_type != "phone":
             return
+
         for dev in self.discovered_devices_list:
             if dev.get('status', '').lower() == 'connected':
                 return
+
+        if time.time() - getattr(self, "_last_connect_request_at", 0.0) < 8.0:
+            log.info("Not asking again: a connect request is already on its way.")
+            return
+
         for dev in self.discovered_devices_list:
             ip = dev.get('ip')
             if not ip:
                 continue
-            log.info(f"Start pressed: requesting audio from paired phone {dev.get('name')} ({ip}).")
+            self._last_connect_request_at = time.time()
+            reason = "Input switched to the phone" if from_input_switch else "Start pressed"
+            log.info(f"{reason}: requesting audio from {dev.get('name')} ({ip}).")
             self.discovery.connect_device(ip)
-            self.lbl_status.SetLabel(
-                f"Status: Connecting to {dev.get('name')}..."
-            )
+            self.lbl_status.SetLabel(f"Status: Connecting to {dev.get('name')}...")
             return
-        log.info("Start pressed with phone selected, but no phone was found on the network.")
+
+        log.info("Phone chosen as input, but no phone was found on the network.")
         self.lbl_status.SetLabel(
             "Status: No phone found. Open the Phones tab and press Connect Phone, then try again."
         )
@@ -3444,28 +3466,25 @@ class ZMicStudioFrame(wx.Frame):
 
             if src_type == "phone":
                 self.lbl_mode.SetLabel("Stream activity: Waiting for phone")
-                log.info("Input device set to Phone over Wi-Fi.")
-                self.engine.input_mode = "phone"
-                self.engine.input_device_id = None
+                log.info(f"Input device set to {label}.")
                 if self.engine.is_running:
-                    # Report the failure instead of silently ignoring the return value.
+                    # set_input_source performs the switch and reports it honestly. Setting
+                    # input_mode beforehand made it log "phone to phone", which hid the fact
+                    # that the engine was coming off a PC microphone.
                     ok, msg = self.engine.set_input_source("phone", None)
                     if ok:
                         self.lbl_status.SetLabel("Status: Waiting for phone on Wi-Fi...")
                         speak_accessibility("Switched to Phone. Waiting for Wi-Fi connection.")
-
-                        # Switching the input only makes the PC listen. Without asking the
-                        # phone to send, no audio ever arrives, so the PC sends no
-                        # acknowledgement, the phone concludes the PC is not responding,
-                        # and it drops the connection. Asking here is what makes a manual
-                        # switch to the phone actually work.
-                        self._request_phone_audio_if_needed("phone")
+                        self._request_phone_audio_if_needed("phone", from_input_switch=True)
                     else:
                         self.lbl_status.SetLabel(f"Status Error: {msg}")
                         play_audio_cue(400, 250)
                         # Do NOT also announce success here: the switch failed.
                         speak_accessibility(f"Failed to switch input: {msg}")
                 else:
+                    self.engine.input_mode = "phone"
+                    self.engine.input_device_id = None
+                    self._request_phone_audio_if_needed("phone", from_input_switch=True)
                     speak_accessibility("Switched to Phone. Waiting for Wi-Fi connection.")
             else:
                 log.info(f"Input device set to {label}.")

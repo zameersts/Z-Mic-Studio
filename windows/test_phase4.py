@@ -616,6 +616,22 @@ def test_phone_reconnect_and_manual_switch():
         check(asked == ["192.168.1.50"],
               "manual switch also asks the phone to start sending", f"{asked}")
 
+        # A second request while the first is still in flight is what made the phone drop
+        # out, so the helper must refuse to ask again for a while.
+        asked.clear()
+        frame._request_phone_audio_if_needed("phone", from_input_switch=True)
+        check(not asked,
+              "a second connect request is not sent while one is in flight", f"{asked}")
+
+        # And it must stay silent when a phone is already connected.
+        asked.clear()
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Connected"}
+        ]
+        frame._request_phone_audio_if_needed("phone", from_input_switch=True)
+        check(not asked,
+              "no request is sent when the phone is already connected", f"{asked}")
+
         # --- reconnecting must move the input back by itself ---
         frame.engine.is_running = True
         frame.input_source_items = [("pc", usb, "Usb Mic")]
@@ -631,6 +647,24 @@ def test_phone_reconnect_and_manual_switch():
         check(frame.engine.input_mode == "phone",
               "the input returned to the phone on its own when the phone came back",
               f"(mode={frame.engine.input_mode})")
+
+        # A phone that is only seen on the network is not ready, and switching onto it is
+        # what made the phone disconnect.
+        frame.engine.input_mode = "pc"
+        frame.cmb_input_source.Clear()
+        frame.cmb_input_source.Append("Usb Mic")
+        frame.cmb_input_source.SetSelection(0)
+        frame.input_source_items = [("pc", usb, "Usb Mic"), ("phone", None, "Phone")]
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Available"}
+        ]
+        frame._follow_phone_back_to_phone_input()
+        check(frame.engine.input_mode == "pc",
+              "it waits until the phone has actually connected, not merely been seen",
+              f"(mode={frame.engine.input_mode})")
+        frame.discovered_devices_list = [
+            {"ip": "192.168.1.50", "name": "MyPhone", "port": 8088, "status": "Connected"}
+        ]
         sel = frame.cmb_input_source.GetSelection()
         check(frame.input_source_items[sel][0] == "phone",
               "the picker also shows the phone as selected", f"(index={sel})")
@@ -920,6 +954,9 @@ def test_no_discovery_auto_connect():
                   "Start on a PC microphone does not contact any phone", f"{asked}")
 
             asked.clear()
+            # Clear the in-flight guard, otherwise the new rule silently skips this and the
+            # test would pass for the wrong reason or fail for no reason at all.
+            frame._last_connect_request_at = 0.0
             frame.discovered_devices_list = []
             frame._request_phone_audio_if_needed("phone")
             check(not asked,
