@@ -205,6 +205,59 @@ def test_dsp_spectral_noise_reduction_dynamic_size():
     assert len(out3) == 960 * 2 * 2
     print("  -> Passed without FFT shape mismatches across 10ms, 5ms, and 20ms frames!")
 
+def test_dsp_fast_path_when_nothing_is_enabled():
+    print("Test 5b: DSP fast path passes audio through untouched when nothing is enabled...")
+    engine = AudioEngine(lambda s, m: None, lambda c, m: None)
+
+    # The shipped default is a 3.5x stereo width, which really does change samples, so the
+    # fast path can only engage once the width is neutral.
+    assert engine.stereo_width != 1.0, "default width is expected to be non-neutral"
+
+    stereo = np.random.randint(-8000, 8000, 240 * 2, dtype=np.int16).tobytes()
+    widened = engine._process_dsp(stereo, is_stereo=True)
+    assert widened != stereo, "a non-neutral stereo width must still change the audio"
+    assert len(widened) == len(stereo), "widening must not change the frame size"
+    print("  -> OK: the default 3.5x width is still applied, frame size unchanged")
+
+    engine.set_stereo_width(1.0)
+    out = engine._process_dsp(stereo, is_stereo=True)
+    assert out == stereo, "with a neutral width a stereo frame must come back byte identical"
+    print("  -> OK: neutral stereo frame passes through byte identical")
+
+    # Every setting that would actually change a sample must leave the fast path.
+    def with_setting(name, apply):
+        fresh = AudioEngine(lambda s, m: None, lambda c, m: None)
+        fresh.set_stereo_width(1.0)
+        apply(fresh)
+        result = fresh._process_dsp(stereo, is_stereo=True)
+        assert result != stereo, f"{name} must not be skipped by the fast path"
+        assert len(result) == len(stereo), f"{name} must not change the frame size"
+        print(f"  -> OK: {name} is still applied")
+
+    with_setting("spectral noise reduction", lambda e: e.set_spectral_noise(True, 50))
+    with_setting("volume below 100%", lambda e: e.set_volume(50))
+    with_setting("non-unity stereo width", lambda e: e.set_stereo_width(1.8))
+    with_setting("Left Mic mode", lambda e: e.set_mode("Left Mic"))
+    with_setting("Right Mic mode", lambda e: e.set_mode("Right Mic"))
+    with_setting("Center Mono mode", lambda e: e.set_mode("Center Mono"))
+    with_setting("mute", lambda e: e.set_muted(True))
+
+    # Mono must still be duplicated into two channels, never passed through as-is.
+    mono = np.random.randint(-8000, 8000, 240, dtype=np.int16).tobytes()
+    mono_out = engine._process_dsp(mono, is_stereo=False)
+    assert len(mono_out) == 240 * 2 * 2, "mono must still be widened to stereo"
+    left = np.frombuffer(mono_out, dtype=np.int16)[0::2]
+    right = np.frombuffer(mono_out, dtype=np.int16)[1::2]
+    assert np.array_equal(left, right), "mono must be duplicated into both channels"
+    print("  -> OK: mono is still duplicated into two channels")
+
+    # An odd trailing byte would previously be dropped; it must not be passed through raw.
+    odd = stereo + b"\x01"
+    odd_out = engine._process_dsp(odd, is_stereo=True)
+    assert len(odd_out) == len(stereo), "a trailing half sample must be dropped, not forwarded"
+    print("  -> OK: a half sample is still dropped")
+    print("  -> Passed!")
+
 def test_udp_stream_integration():
     print("Test 6: UDP Socket Live Streaming Integration (Protocol v2 + Loss Detection + Version Gate)...")
     status_history = []
@@ -436,6 +489,7 @@ def run_all():
     test_jitter_buffer_overrun_trimming()
     test_protocol_v2_packet_encoding_and_dsp()
     test_dsp_spectral_noise_reduction_dynamic_size()
+    test_dsp_fast_path_when_nothing_is_enabled()
     test_udp_stream_integration()
     test_trusted_phone_auto_approved_without_reprompt()
     test_helpers_are_byte_identical_to_inline_construction()

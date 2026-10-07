@@ -1308,7 +1308,31 @@ class AudioEngine:
         if not raw_bytes:
             return b''
 
+        # Fast path: nothing in the chain would change a single sample, so hand the bytes
+        # straight back instead of round tripping them through float32. At 200 packets a
+        # second the round trip was three NumPy allocations per packet on the receiver
+        # thread, which measurably delayed that thread and made the arrival pattern at the
+        # PC worse. Skipping it took the gap distribution much closer to what a bare socket
+        # sees. The packet count, the header and the wire format are untouched.
+        if (is_stereo
+                and not self.is_muted
+                and self.mode == "Stereo 3D"
+                and self.stereo_width == 1.0
+                and not self.spectral_noise_enabled
+                and not self.echo_enabled
+                and self.volume_gain == 1.0
+                and len(raw_bytes) % 2 == 0):
+            return raw_bytes
+
         # 1. Unpack into NumPy int16 array
+        # A datagram can be truncated in transit, so the byte count may not divide evenly
+        # into 16-bit samples. np.frombuffer raises on that, and the receiver runs this per
+        # packet, so one malformed datagram would otherwise throw on every frame after it.
+        if len(raw_bytes) % 2 != 0:
+            raw_bytes = raw_bytes[:-1]
+            if not raw_bytes:
+                return b''
+
         if is_stereo:
             samples = np.frombuffer(raw_bytes, dtype=np.int16)
             if len(samples) % 2 != 0:
