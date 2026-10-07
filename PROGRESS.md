@@ -124,3 +124,20 @@ These are decided but not started yet.
 - **Known gap**: There is no Windows executable yet, so the app cannot be
   handed to someone who does not have Python installed.
 - **Next Backlog**: Build the executable, starting with the small Nuitka test.
+
+---
+
+## Network setup (do not get this wrong again)
+
+- **The PC has no Wi-Fi adapter in use. It is connected by Ethernet cable.**
+  - PC address: `192.168.100.2` (wired)
+  - Phone address: `192.168.100.3` (Wi-Fi, Samsung SM-A065F)
+- Therefore the audio path is: phone `--Wi-Fi--> router `--Ethernet--> PC`.
+- Consequence for diagnosing audio problems:
+  - Any remaining packet jitter is on the **phone's Wi-Fi hop or the router**, never on the
+    PC's own network. The PC's wired side adds nothing and cannot be blamed.
+  - Do not suggest Wi-Fi settings on the PC. There are none.
+  - The PC side that *can* still hurt audio is its **receive path**: the wx main thread
+    competing with the UDP receiver thread for the GIL, and the jitter buffer depth.
+- Measured on 2026-10-07 after the paced sender fix: roughly 2 gaps per second in the
+  30-90ms range, all in transit, with zero packet loss.
