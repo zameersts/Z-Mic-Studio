@@ -693,6 +693,25 @@ class AudioStreamService : Service() {
         Log.i(TAG, "PM_CONNECT from '$pcName' ($pcIp), trusted='$trusted'")
 
         if (trusted != null && trusted == pcName) {
+            val movedToNewAddress = isStreaming && !currentHost.equals(pcIp, ignoreCase = true)
+
+            if (movedToNewAddress) {
+                // The same, already trusted PC is now answering from a different local address.
+                // That is what happens when a PC changes how it reaches the network: the
+                // Ethernet cable is pulled, the old address dies, and Wi-Fi or a different
+                // adapter takes over. The stream is pointed at the address that is gone, so
+                // nothing can arrive, the heartbeat is missed, and after 2.5 seconds the phone
+                // stops streaming and reports that the PC is gone. It used to refuse this
+                // outright as a duplicate connection, which is why switching the PC between
+                // Ethernet and Wi-Fi left the user with no voice and no explanation until they
+                // restarted the phone app.
+                Log.i(
+                    TAG,
+                    "Trusted PC '$pcName' moved from $currentHost to $pcIp. Following it."
+                )
+                stopStreaming()
+            }
+
             currentPcName = pcName
             verifiedPcName = pcName
             currentHost = pcIp
