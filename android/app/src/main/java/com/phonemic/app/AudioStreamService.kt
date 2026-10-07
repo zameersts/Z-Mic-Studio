@@ -19,6 +19,7 @@ import android.os.PowerManager
 import android.util.Log
 import com.phonemic.app.audio.AudioConfig
 import com.phonemic.app.audio.AudioRecorder
+import com.phonemic.app.audio.PacedAudioSender
 import com.phonemic.app.network.UdpAudioSender
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -49,6 +50,9 @@ class AudioStreamService : Service() {
     private var highPerfWifiLock: WifiManager.WifiLock? = null
     private var sender: UdpAudioSender? = null
     private var recorder: AudioRecorder? = null
+
+    /** Owns the paced transmission thread. Closed before the UDP socket. */
+    private var pacedSender: PacedAudioSender? = null
 
     private val streamLock = Any()
 
@@ -314,13 +318,21 @@ class AudioStreamService : Service() {
                 // Publish before starting the recorder so the capture thread always sees a sender.
                 sender = newSender
 
+                // Transmission runs on its own paced thread. Sending inline on the capture
+                // thread made the arrival pattern clump badly enough to sound like a cut, and
+                // let a slow send stall the microphone read entirely.
+                val paced = PacedAudioSender { data, len, stereo, samples ->
+                    newSender.send(data, len, stereo, samples)
+                }
+                pacedSender = paced
+                paced.start()
+
                 val rec = AudioRecorder { pcmBytes, bytesRead, isStereo, samplesPerChannel ->
                     if (!isStreaming) return@AudioRecorder
-                    if (isMuted) {
-                        newSender.send(silenceBuffer, bytesRead, isStereo, samplesPerChannel)
-                    } else {
-                        newSender.send(pcmBytes, bytesRead, isStereo, samplesPerChannel)
-                    }
+                    paced.enqueue(
+                        if (isMuted) silenceBuffer else pcmBytes,
+                        bytesRead, isStereo, samplesPerChannel
+                    )
                     maybeSendHeartbeat()
                 }
                 rec.onCaptureError = { msg ->
@@ -356,6 +368,8 @@ class AudioStreamService : Service() {
                 isStreaming = false
                 isServiceRunning = false
                 runCatching { newRecorder?.stop() }
+                runCatching { pacedSender?.close() }
+                pacedSender = null
                 runCatching { newSender?.close() }
                 recorder = null
                 sender = null
@@ -466,6 +480,14 @@ class AudioStreamService : Service() {
             recorder = null
             runCatching { rec?.stop() }
                 .onFailure { Log.w(TAG, "Error stopping recorder", it) }
+
+            // Order matters: capture first so nothing new is queued, then the paced thread so
+            // any frame already held is sent, and only then the socket. Closing the socket
+            // earlier would drop the last frame and close the phone mid-sentence.
+            val paced = pacedSender
+            pacedSender = null
+            runCatching { paced?.close() }
+                .onFailure { Log.w(TAG, "Error stopping paced sender", it) }
 
             val snd = sender
             sender = null

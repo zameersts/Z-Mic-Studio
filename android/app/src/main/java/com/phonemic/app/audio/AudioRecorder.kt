@@ -200,6 +200,11 @@ class AudioRecorder(
                             )
                             firstFrameLogged = true
                         }
+
+                        // Delivery is handed straight back. Pacing and transmission belong to
+                        // PacedAudioSender, which runs on its own thread. Sleeping here instead
+                        // would only fill the queue, because capture and release would still
+                        // share one thread and the read time would jitter the schedule.
                         // Deliver silent frames while muted so UDP timing is preserved.
                         val out = if (isMuted) silenceBuffer else frameBuffer
                         onAudioChunkCaptured(out, bytesReadTotal, isStereo, samplesPerChannel)
