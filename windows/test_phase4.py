@@ -338,9 +338,17 @@ def test_terms_and_privacy():
               f"the launch check does not steal focus ({forbidden})")
     check("threading.Thread" in launch_check,
           "the launch check runs off the main thread, so it cannot freeze the app")
-    check(Z.UPDATE_CHECK_INTERVAL_SECONDS >= 24 * 60 * 60,
-          "the launch check is rate limited to at most once a day",
+    # The rate limit was a week, on the argument that a request per launch is rude on a
+    # metered connection. The owner asked for every launch, and that is what shipped. The
+    # reason it is defensible here is that the file read happens on a background thread after
+    # the window is up, so nothing about opening the app is slower for it.
+    check(Z.UPDATE_CHECK_INTERVAL_SECONDS == 0,
+          "the launch check runs on every launch, as the owner asked for",
           f"(interval {Z.UPDATE_CHECK_INTERVAL_SECONDS}s)")
+    # The limit must still work when someone sets it, so a future change to a non-zero value
+    # cannot silently stop being enforced.
+    check("UPDATE_CHECK_INTERVAL_SECONDS" in launch_check,
+          "the rate limit is still honoured if a value is set")
 
     # The button must always answer, even with nothing configured. A dead button gives no
     # explanation and looks broken.

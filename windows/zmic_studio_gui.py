@@ -141,10 +141,18 @@ JITTER_MAX_MS = 160
 RUMBLE_CUTOFF_HZ = 80
 RUMBLE_FIR_TAPS = 769
 
-# How often the launch update check may run. One a week. Checking on every launch would mean a
-# network request every time the app is opened, which is rude on a metered connection and
-# would eventually get the update address rate limited or blocked outright.
-UPDATE_CHECK_INTERVAL_SECONDS = 7 * 24 * 60 * 60
+# How often the launch update check may run. Zero means every launch.
+#
+# A week was the setting before, on the reasoning that a request per launch is rude on a
+# metered connection and might get the address rate limited. The owner asked for a check on
+# every launch, and that is the right call here for a different reason: the request reads a
+# single short file and is made in the background well after the window appears, so the app
+# opens at the same speed either way. Waiting a week meant a freshly installed copy could sit
+# for a week without ever learning a newer version existed.
+#
+# Zero restores the original behaviour, where the file was read once per launch, which is what
+# this interval was added to replace. Set it to a number of seconds to reintroduce a delay.
+UPDATE_CHECK_INTERVAL_SECONDS = 0
 
 # Maximum PC hostname length encoded into a pairing request
 MAX_PC_NAME_BYTES = 32
@@ -3049,9 +3057,9 @@ class ZMicStudioFrame(wx.Frame):
         status line and spoken once, both of which are free to ignore. The dialog only ever
         appears from the button, where the press is unambiguous.
 
-        One check per week at most. Checking on every single launch would mean a network
-        request each time the app is opened, which is rude on a metered connection and would
-        eventually get the address rate limited.
+        Runs on every launch unless UPDATE_CHECK_INTERVAL_SECONDS says otherwise. The request
+        goes out on a background thread after the window is already up, so it costs nothing the
+        person can see.
         """
         if not self.update_source:
             return
