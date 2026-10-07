@@ -15,7 +15,7 @@
 ---
 
 ## 🛠️ Environment & Tool Paths
-- **ADB Executable**: `C:\Users\Zameer\Downloads\platform-tools-latest-windows\platform-tools\adb.exe`
+- **ADB Executable**: `%LOCALAPPDATA%\Android\platform-tools\adb.exe`
 - **Virtual Audio Device**: `CABLE Input (VB-Audio Virtual Cable)`
   - Not bundled. If absent at startup the main interface does not open; the app opens the
     official VB-Audio page in the default browser and then closes (a reboot is required).
@@ -130,8 +130,8 @@ These are decided but not started yet.
 ## Network setup (do not get this wrong again)
 
 - **The PC has no Wi-Fi adapter in use. It is connected by Ethernet cable.**
-  - PC address: `192.168.100.2` (wired)
-  - Phone address: `192.168.100.3` (Wi-Fi, Samsung SM-A065F)
+  - PC address: `<pc-ip>` (wired)
+  - Phone address: `<phone-ip>` (Wi-Fi, Samsung SM-A065F)
 - Therefore the audio path is: phone `--Wi-Fi--> router `--Ethernet--> PC`.
 - Consequence for diagnosing audio problems:
   - Any remaining packet jitter is on the **phone's Wi-Fi hop or the router**, never on the
@@ -148,7 +148,7 @@ These are decided but not started yet.
 Verified on 2026-10-07 with an elevated query. The Windows Firewall already contains
 inbound Allow rules for the interpreter this app runs under:
 
-    python.exe  C:\Users\Zameer\AppData\Local\Programs\Python\Python314\python.exe  Any UDP Inbound Allow Public
+    python.exe  <Python install>\Python314\python.exe  Any UDP Inbound Allow Public
     python.exe  ...\python.exe                                                          Any TCP Inbound Allow Public
     pythonw.exe ...\pythonw.exe                                                         Any UDP Inbound Allow Public
 
@@ -171,7 +171,7 @@ required.
 
 If audio ever stops arriving, the firewall is not the first place to look. Check instead:
 whether the PC is holding two addresses in one subnet (a stale address on a disconnected
-Ethernet adapter used to sit at 192.168.100.2 while Wi-Fi was 192.168.100.5), and whether the
+Ethernet adapter used to sit at <pc-ip> while Wi-Fi was <pc-ip-wifi>), and whether the
 phone is discarding the PC's packets because they arrive from an address other than the one it
 connected to.
 

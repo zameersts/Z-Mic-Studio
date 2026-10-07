@@ -5,10 +5,17 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Release signing credentials live outside the repository. A build machine without
-// that file still works: it falls back to debug signing, which is useful for testing
-// but produces an APK that can never be updated by a real release.
-val signingPropertiesFile = file("C:/Users/Zameer/ZMicStudio-Keys/keystore.properties")
+// Release signing credentials live outside the repository, and where they live is a fact
+// about the machine doing the build rather than about the project. The path used to be
+// hardcoded here, which published the owner's home directory and, with it, the exact
+// location of the keystore.
+//
+// Resolution order:
+//   1. ZMIC_KEYSTORE_PROPERTIES, an environment variable pointing at the properties file
+//   2. android/keystore.properties, which is gitignored
+//   3. nothing found, in which case debug signing is used and the APK can never be updated
+val signingPropertiesFile = System.getenv("ZMIC_KEYSTORE_PROPERTIES")?.let(::file)
+    ?: rootProject.file("keystore.properties")
 val signingProperties = Properties().apply {
     if (signingPropertiesFile.exists()) {
         signingPropertiesFile.inputStream().use { stream -> load(stream) }
@@ -26,7 +33,7 @@ android {
         targetSdk = 35
         versionCode = 1
         // Must match APP_VERSION in windows/zmic_studio_gui.py
-        versionName = "0.9.0-beta"
+        versionName = "0.9.1"
     }
 
     signingConfigs {

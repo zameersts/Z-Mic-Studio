@@ -1,10 +1,10 @@
 # Project Rules & Environment Configuration
 
 ## Android Debug Bridge (ADB) & Device Connection
-- **Platform Tools Directory**: `C:\Users\Zameer\Downloads\platform-tools-latest-windows\platform-tools`
-- **ADB Executable**: `C:\Users\Zameer\Downloads\platform-tools-latest-windows\platform-tools\adb.exe`
+- **Platform Tools Directory**: `%LOCALAPPDATA%\Android\platform-tools`
+- **ADB Executable**: `%LOCALAPPDATA%\Android\platform-tools\adb.exe`
 - **Device Detection**: Whenever interacting with Android devices or checking device status, always use this specific ADB path.
-- If a device is not yet detected or shown, running `& "C:\Users\Zameer\Downloads\platform-tools-latest-windows\platform-tools\adb.exe" devices` will start the ADB server daemon and connect to the device.
+- If a device is not yet detected or shown, running `& "%LOCALAPPDATA%\Android\platform-tools\adb.exe" devices` will start the ADB server daemon and connect to the device.
 
 ## Project Memory & State
 - Always check `PROGRESS.md` to see completed milestones, active status, and technical specifications before beginning any task.
