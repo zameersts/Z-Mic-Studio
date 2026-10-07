@@ -1718,6 +1718,52 @@ def test_update_check_is_opt_in_and_installs_nothing():
     check(update_check.check_for_update("", "0.9.0") == {"ok": False, "error": "empty"},
           "an empty address does not attempt any connection at all")
 
+    # The address must come with the app, never from the person using it. A screen-reader
+    # user cannot be asked to paste a release feed URL, and the per-user settings file would
+    # have meant every user had to do it individually, which inverts the problem.
+    import os as _os
+    import tempfile as _tempfile
+    folder = _os.path.join(_tempfile.gettempdir(), "ZMicUpdateCfgTest")
+    _os.makedirs(folder, exist_ok=True)
+    config = _os.path.join(folder, update_check.CONFIG_FILENAME)
+
+    # Point the module at the temp file. Writing into the install folder is not permitted on a
+    # normal machine, so a test that did that would pass here and fail elsewhere.
+    update_check._TEST_CONFIG_PATH = config
+
+    def _with_config(contents):
+        with open(config, "w", encoding="utf-8") as fh:
+            fh.write(contents)
+        return update_check.read_configured_source()
+
+    try:
+        check(_with_config("") == "", "a missing or empty address means no internet use")
+        check(_with_config("https://example.invalid/version.txt") == "https://example.invalid/version.txt",
+              "the address is read from the file that came with the app")
+        check(_with_config("# a comment\n\nhttps://example.invalid/v.txt\n") == "https://example.invalid/v.txt",
+              "comments and blank lines are ignored, so the file can be annotated")
+        check(_with_config("   \n\t\n") == "",
+              "a file of blank lines is treated as no address")
+        _os.remove(config)
+        check(update_check.read_configured_source() == "",
+              "a missing file is not an error, it simply means checks are off")
+        check(update_check.CONFIG_FILENAME == "update_source.txt",
+              "the file has a fixed name so the installer can create it")
+        check(update_check.config_path().endswith(update_check.CONFIG_FILENAME),
+              "the address file is looked for beside the app by default")
+    finally:
+        update_check._TEST_CONFIG_PATH = None
+        try:
+            _os.remove(config)
+        except OSError:
+            pass
+
+    # And no control in the About tab may invite the user to type an address.
+    with open(Z.__file__, encoding="utf-8") as fh:
+        about_src = fh.read()
+    check("txt_update_source" not in about_src,
+          "there is no text box asking the user for an update address")
+
     # Versions, including the pre-release case that decides whether a beta user gets pushed
     # onto a release.
     check(update_check.is_newer("0.9.1", "0.9.0"), "a higher patch is newer")

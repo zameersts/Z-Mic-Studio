@@ -21,7 +21,9 @@ the app, and the user asked for this by pressing a button, so there is nothing t
 """
 
 import json
+import os
 import re
+import sys
 import urllib.error
 import urllib.request
 
@@ -89,6 +91,64 @@ def extract_version(body):
     if parse_version(first):
         return first.lstrip("vV")
     return None
+
+
+def app_directory():
+    """The directory the app is installed in.
+
+    For a compiled build that is the folder containing the executable. When running from
+    source it is the project folder, so the file is found in either case and there is no need
+    to branch anywhere else.
+    """
+    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+CONFIG_FILENAME = "update_source.txt"
+
+
+def config_path():
+    """Where the shipped address file is looked for.
+
+    Overridable so it can be tested without writing into the install folder, which is not
+    writable on a normal machine and is exactly the sort of thing that makes a test pass
+    locally and fail on a colleague's PC.
+    """
+    override = globals().get("_TEST_CONFIG_PATH")
+    if override:
+        return override
+    return os.path.join(app_directory(), CONFIG_FILENAME)
+
+
+def read_configured_source():
+    """The update address that came with this copy of the app, or "" if there is none.
+
+    This is a file beside the app rather than a setting, and that is deliberate. Two reasons,
+    and both were learned the hard way.
+
+    First, whoever installs this app is not going to know what a release feed URL is, and
+    asking a screen-reader user to paste one into a text box would be a puzzle with no purpose.
+    The address is a publishing decision, so it belongs with the published files.
+
+    Second, putting it in the per-user settings file meant every user had to set it
+    individually. That inverts the problem entirely: the person publishing a release knows the
+    address, and the person using the app does not.
+
+    A file also means a new address can be published by replacing one text file, with no
+    rebuild. The same value is read fresh each time rather than cached, so editing the file and
+    restarting is enough.
+    """
+    path = config_path()
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return line
+    except OSError:
+        return ""
+    return ""
 
 
 def check_for_update(source, current_version):

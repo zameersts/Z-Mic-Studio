@@ -22,6 +22,7 @@ import sounddevice as sd
 import wx
 import terms
 import firewall_rule
+import update_check
 from update_check import check_for_update
 
 def get_log_dir():
@@ -2921,17 +2922,7 @@ class ZMicStudioFrame(wx.Frame):
 
         self.lbl_update_status = wx.StaticText(page, wx.ID_ANY, "")
         self.lbl_update_status.SetForegroundColour(wx.Colour(90, 90, 90))
-        sizer.Add(self.lbl_update_status, 0, wx.LEFT | wx.TOP, 12)
-
-        self.txt_update_source = wx.TextCtrl(page, wx.ID_ANY, value=self.settings.get('update_source', ''))
-        self.txt_update_source.SetName("Update address, a web address or a repository link")
-        sizer.Add(self.txt_update_source, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 12)
-
-        hint = wx.StaticText(page, wx.ID_ANY,
-                             "Where new versions are announced. Leave empty to switch "
-                             "update checks off.")
-        hint.SetForegroundColour(wx.Colour(90, 90, 90))
-        sizer.Add(hint, 0, wx.LEFT | wx.RIGHT, 12)
+        sizer.Add(self.lbl_update_status, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
 
         btn_row = wx.BoxSizer(wx.HORIZONTAL)
         self.btn_check_updates = wx.Button(page, wx.ID_ANY, "&Check for Updates")
@@ -2953,14 +2944,17 @@ class ZMicStudioFrame(wx.Frame):
         self._refresh_update_labels()
 
     def _refresh_update_labels(self):
-        """Re-reads the stored state and writes both status lines."""
-        source = self.settings.get('update_source', '').strip()
+        """Re-reads the shipped configuration and writes both status lines."""
+        source = update_check.read_configured_source()
+        self.update_source = source
         if source:
             self.lbl_update_status.SetLabel(
-                "Last checked: never. Updates come from the address above.")
+                "This copy checks for updates at an address supplied with it. "
+                "You do not need to set anything up.")
         else:
             self.lbl_update_status.SetLabel(
-                "Update checks are off. Add an address above to turn them on.")
+                "This copy has no update address supplied with it, so it never "
+                "connects to the internet on its own.")
         self.lbl_update_status.SetName(self.lbl_update_status.GetLabel())
 
         detail = firewall_rule.describe(self.settings)
@@ -2969,18 +2963,21 @@ class ZMicStudioFrame(wx.Frame):
 
         target = firewall_rule.target_executable()
         self.btn_firewall.Enable(target is not None)
+        self.btn_check_updates.Enable(bool(source))
 
     def on_check_updates(self, event=None):
-        """Saves the update address and performs the check.
+        """Checks the shipped update address.
 
-        The check is deliberately quiet. A screen-reader user cannot be shown a dialog they
-        did not ask for without losing their place, so an ordinary launch never does this
+        The address is read from a file that comes with the app, never typed by the person
+        using it. A box asking a screen-reader user to paste a web address would be a puzzle
+        with no purpose, and it would put a decision that belongs to whoever publishes the app
+        into the hands of the person using it.
+
+        The check is also deliberately quiet. A screen-reader user cannot be shown a dialog
+        they did not ask for without losing their place, so an ordinary launch never does this
         automatically. The button is the whole interaction.
         """
-        source = self.txt_update_source.GetValue().strip()
-        self.settings['update_source'] = source
-        terms.save_settings(self.settings)
-
+        source = self.update_source
         if not source:
             self.lbl_update_status.SetLabel("Update checks are off. No address is set.")
             self.lbl_update_status.SetName(self.lbl_update_status.GetLabel())
