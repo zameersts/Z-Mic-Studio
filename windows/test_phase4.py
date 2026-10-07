@@ -323,7 +323,9 @@ def test_terms_and_privacy():
     symbols = [ch for ch in body if ch in ("*", "\u2022", "\u25cf", "\u2023", "\u2043")]
     check(not symbols, f"no bullet or star characters in terms text {symbols}")
 
-    # 5. Acceptance storage round trip.
+    # 5. Acceptance storage round trip. The user's real state is captured first and put back at
+    # the end, because this is the only test that touches the actual settings file.
+    accepted_before = terms.is_terms_accepted()
     terms.clear_terms_acceptance()
     check(terms.is_terms_accepted() is False, "acceptance starts empty")
     ok = terms.record_terms_accepted()
@@ -372,9 +374,15 @@ def test_terms_and_privacy():
           "viewer shows the same text as the wizard")
     viewer.Destroy()
 
-    # Restore a clean state so the next real launch shows the wizard.
-    terms.clear_terms_acceptance()
-    check(terms.is_terms_accepted() is False, "acceptance cleared for testing")
+    # Restore whatever the user actually had. This used to clear acceptance and stop there,
+    # which meant running the suite wiped the real settings file and the Terms wizard appeared
+    # on the next launch. A test must not leave the machine worse than it found it.
+    if accepted_before:
+        terms.record_terms_accepted()
+    else:
+        terms.clear_terms_acceptance()
+    check(terms.is_terms_accepted() == accepted_before,
+          f"the user's original Terms state is restored (was accepted={accepted_before})")
     print("  -> Passed!")
 
 
