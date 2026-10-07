@@ -93,7 +93,13 @@ def load_settings():
     try:
         path = get_settings_path()
         if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as fh:
+            # utf-8-sig rather than utf-8. A byte order mark makes json.load raise, the
+            # except below swallows that, and every setting is lost at once: the app forgets
+            # the accepted terms, shows the first run screen to someone who has already agreed,
+            # and resets the input choice. Nothing here writes a mark, but a person editing
+            # this file in Notepad will, and losing all settings with no message is a
+            # miserable thing to debug from the outside.
+            with open(path, 'r', encoding='utf-8-sig') as fh:
                 data = json.load(fh)
             if isinstance(data, dict):
                 return data

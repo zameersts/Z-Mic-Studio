@@ -33,7 +33,7 @@ android {
         targetSdk = 35
         versionCode = 1
         // Must match APP_VERSION in windows/zmic_studio_gui.py
-        versionName = "0.9.1"
+        versionName = "0.9.2"
     }
 
     signingConfigs {

@@ -387,6 +387,26 @@ def test_terms_and_privacy():
     check(stored.get('accepted_terms_version') == terms.TERMS_VERSION,
           "stored version matches TERMS_VERSION")
 
+    # A byte order mark must not wipe the file's contents. load_settings swallows every
+    # exception and returns an empty dict, so a settings file that json cannot parse looks
+    # exactly like a fresh install: the terms reappear, the chosen input is forgotten, and
+    # nothing anywhere says why. Notepad writes a mark, so this is reachable by a person
+    # editing their own settings, not just by a script.
+    settings_path = terms.get_settings_path()
+    with open(settings_path, 'r', encoding='utf-8-sig') as fh:
+        good_text = fh.read()
+    try:
+        with open(settings_path, 'w', encoding='utf-8-sig') as fh:
+            fh.write(good_text)
+        check(open(settings_path, 'rb').read(3) == b'\xef\xbb\xbf',
+              "the test really did write a byte order mark")
+        reread = terms.load_settings()
+        check(reread.get('accepted_terms_version') == terms.TERMS_VERSION,
+              "settings survive a byte order mark, so acceptance is not silently lost")
+    finally:
+        with open(settings_path, 'w', encoding='utf-8') as fh:
+            fh.write(good_text)
+
     # 6. Changing the wording must force a re-read.
     check(terms.is_terms_accepted() is True, "accepted while versions match")
     original_version = terms.TERMS_VERSION
