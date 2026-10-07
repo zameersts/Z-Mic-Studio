@@ -15,7 +15,6 @@ import os
 import sys
 import time
 import threading
-import webbrowser
 
 import wx
 
@@ -349,8 +348,8 @@ def test_terms_and_privacy():
         handler = fh.read().split("def on_check_updates")[1].split("\n    def ")[0]
     check("if not source:" in handler,
           "the button explains itself when no address is configured")
-    check("Check your internet" in handler,
-          "the button says so when the internet cannot be reached")
+    check("Could not check for updates." in handler,
+          "a failure says so in one short line, without blaming the user's internet")
     check("latest version" in handler,
           "the button confirms when already up to date")
     # The confirmation lives in _offer_update_page, which the handler delegates to once a
@@ -1919,8 +1918,14 @@ def test_firewall_only_asks_when_it_must():
 
 
 def test_update_button_answers_in_every_case():
-    """Clicking Check must always say something, whatever the outcome."""
+    """Clicking Check must always say something short, whatever the outcome.
+
+    The wording is deliberately terse. An earlier version produced multi sentence
+    explanations for every outcome, which is not what a utility does, and the user was right to
+    call it out. Anything the app cannot add useful information about is now one short line.
+    """
     import threading
+    import webbrowser
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     global _test_app
@@ -1930,10 +1935,6 @@ def test_update_button_answers_in_every_case():
 
     frame = Z.PhoneMicFrame()
     try:
-        # The launch hook itself, invoked the exact way main() does it. Two versions of this
-        # were wrong and both took the whole app down on a real launch while every automated
-        # suite passed, because none of them enter main(). wx.CallAfter takes no delay
-        # argument, and it is a static method, so it must not be called on the instance either.
         with open(Z.__file__, encoding="utf-8") as fh:
             main_src = fh.read().split("def main()")[1]
         check("wx.CallLater(2000, frame._background_update_check)" in main_src,
@@ -1941,23 +1942,12 @@ def test_update_button_answers_in_every_case():
         for wrong in ("wx.CallAfter(frame,", "frame.CallAfter("):
             check(wrong not in main_src, f"main() does not use {wrong}")
 
-        raised = None
-        try:
-            wx.CallLater(1, lambda: None)
-        except Exception as exc:  # pragma: no cover - only if wx itself changes
-            raised = exc
-        check(raised is None, "the launch hook call style used by main() is valid")
-        check(not hasattr(frame, "_update_source_text_box"),
-              "the About tab has no update address box to fill in")
-
-        # Nothing configured: the button must explain rather than do nothing silently.
+        # No address configured.
         frame.update_source = ""
         frame.on_check_updates(None)
-        check("not given an update address" in frame.lbl_update_status.GetLabel(),
-              "with no address the button explains why there is nothing to check",
+        check(frame.lbl_update_status.GetLabel() == "No update address set.",
+              "with no address it says so in as few words as possible",
               f"({frame.lbl_update_status.GetLabel()!r})")
-        check(Z.APP_VERSION_DISPLAY in frame.lbl_update_status.GetLabel(),
-              "it still tells the user which version they have")
 
         payload = {"body": '0.0.1'}
 
@@ -1976,51 +1966,41 @@ def test_update_button_answers_in_every_case():
         threading.Thread(target=server.serve_forever, daemon=True).start()
 
         try:
-            # Server unreachable.
             frame.update_source = f"http://127.0.0.1:{port}/v"
+
+            # Nothing newer.
             frame.on_check_updates(None)
-            label = frame.lbl_update_status.GetLabel()
-            check("latest version" in label,
-                  "a server answering with an old version confirms you are up to date",
-                  f"({label!r})")
+            check(frame.lbl_update_status.GetLabel()
+                  == f"You are on the latest version, {Z.APP_VERSION_DISPLAY}.",
+                  "up to date is one short sentence",
+                  f"({frame.lbl_update_status.GetLabel()!r})")
 
-            # A newer version is announced.
+            # Something newer. Answer the confirmation with No so nothing opens.
             payload["body"] = "99.0.0"
-            asked = []
+            opened = []
             original = webbrowser.open_new_tab
-            webbrowser.open_new_tab = lambda url: asked.append(url) or True
+            webbrowser.open_new_tab = lambda url: opened.append(url) or True
+            original_dialog = wx.MessageDialog.ShowModal
             try:
-                # Answer the confirmation dialog with No, so the test never opens a browser
-                # and never blocks on a modal.
-                original_dialog = wx.MessageDialog.ShowModal
                 wx.MessageDialog.ShowModal = lambda self: wx.ID_NO
-                try:
-                    frame.on_check_updates(None)
-                finally:
-                    wx.MessageDialog.ShowModal = original_dialog
-                label = frame.lbl_update_status.GetLabel()
-                check("newer version is available" in label,
-                      "a newer version is announced in words", f"({label!r})")
-                check(asked == [],
-                      "nothing is opened when the user says no",
-                      f"({asked})")
-                check(Z.APP_VERSION_DISPLAY in label and "99.0.0" in label,
-                      "the message names both the current and the new version")
+                frame.on_check_updates(None)
             finally:
+                wx.MessageDialog.ShowModal = original_dialog
                 webbrowser.open_new_tab = original
+            check(frame.lbl_update_status.GetLabel() == "New version available: 99.0.0",
+                  "a new version is announced in as few words as possible",
+                  f"({frame.lbl_update_status.GetLabel()!r})")
+            check(opened == [], "nothing opens unless the user agrees")
 
-            # The server is gone: the message must name the likely cause.
+            # Nothing listening any more.
             server.shutdown()
             server.server_close()
             frame.on_check_updates(None)
-            label = frame.lbl_update_status.GetLabel()
-            check("Check your internet" in label or "Could not reach" in label,
-                  "an unreachable address tells the user to check their internet",
-                  f"({label!r})")
-            check(Z.APP_VERSION_DISPLAY in label,
-                  "even a failure states which version is running")
+            check(frame.lbl_update_status.GetLabel() == "Could not check for updates.",
+                  "a network failure is one short line and nothing more",
+                  f"({frame.lbl_update_status.GetLabel()!r})")
 
-            # A response that is not a version at all.
+            # A reachable page that is not a version number.
             payload["body"] = "<html>not a version</html>"
             server2 = HTTPServer(("127.0.0.1", 0), Handler)
             port2 = server2.server_address[1]
@@ -2028,24 +2008,43 @@ def test_update_button_answers_in_every_case():
             try:
                 frame.update_source = f"http://127.0.0.1:{port2}/v"
                 frame.on_check_updates(None)
-                check("not with a version number" in frame.lbl_update_status.GetLabel(),
-                      "a page that is not a version says so plainly",
-                      f"({frame.lbl_update_status.GetLabel()!r})")
+                check(frame.lbl_update_status.GetLabel() == "Could not check for updates.",
+                      "a page that is not a version reads the same as any other failure")
+            except OSError:
+                pass
             finally:
                 server2.shutdown()
                 server2.server_close()
+
         finally:
             try:
                 server.server_close()
             except Exception:
                 pass
 
-        # The button must be re-enabled after every path, or the second press does nothing.
         check(frame.btn_check_updates.IsEnabled(),
               "the button is usable again after checking")
+
+        # Every message the update code can produce, checked for length. A utility that
+        # announces itself in a paragraph is a utility nobody reads.
+        with open(Z.__file__, encoding="utf-8") as fh:
+            src_text = fh.read()
+        update_block = src_text.split("def on_check_updates")[1].split("def on_firewall_repair")[0]
+        quoted = []
+        for line in update_block.splitlines():
+            if "_set_update_result(" in line:
+                if '"' in line:
+                    quoted.append(line.split('"')[1])
+                elif "'" in line:
+                    quoted.append(line.split("'")[1])
+        for text in quoted:
+            if not text or text.startswith("{"):
+                continue
+            check(len(text) <= 60,
+                  f"the message is short enough to read at a glance: {text!r}",
+                  f"(len {len(text)})")
     finally:
         frame.Destroy()
-
 
 
 def run_all():

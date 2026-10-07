@@ -2954,13 +2954,9 @@ class ZMicStudioFrame(wx.Frame):
         source = update_check.read_configured_source()
         self.update_source = source
         if source:
-            self.lbl_update_status.SetLabel(
-                "This copy checks for updates at an address supplied with it. "
-                "You do not need to set anything up.")
+            self.lbl_update_status.SetLabel("Ready to check for updates.")
         else:
-            self.lbl_update_status.SetLabel(
-                "This copy has no update address supplied with it, so it never "
-                "connects to the internet on its own.")
+            self.lbl_update_status.SetLabel("No update address set.")
         self.lbl_update_status.SetName(self.lbl_update_status.GetLabel())
 
         detail = firewall_rule.describe(self.settings)
@@ -2984,16 +2980,10 @@ class ZMicStudioFrame(wx.Frame):
         """
         source = self.update_source
         if not source:
-            # The button stays live even with nothing configured, because a button that cannot
-            # be pressed gives no explanation and looks broken. Answering here is more use than
-            # leaving the user guessing why nothing happens.
-            msg = ("This copy of Z Mic Studio was not given an update address, so there "
-                   "is nothing to check against. You are on version "
-                   f"{APP_VERSION_DISPLAY}, which is the version you have.")
-            self._set_update_result(msg, speak=True)
+            self._set_update_result("No update address set.", speak=True)
             return
 
-        self._set_update_result("Checking for updates...", speak=False)
+        self._set_update_result("Checking...", speak=False)
         self.btn_check_updates.Disable()
         try:
             result = check_for_update(source, APP_VERSION_DISPLAY)
@@ -3004,48 +2994,30 @@ class ZMicStudioFrame(wx.Frame):
         terms.save_settings(self.settings)
 
         if not result.get('ok'):
-            # Every failure is named. "Something went wrong" is useless to someone who
-            # cannot see the screen and has to decide whether to try again or give up.
-            if result.get('error') == 'empty':
-                msg = "That address did not return a version number."
-            elif result.get('error') == 'no_version':
-                msg = ("That address answered, but not with a version number. It may be "
-                       f"the wrong page. You are on version {APP_VERSION_DISPLAY}.")
-            elif result.get('error') == 'unreachable':
-                msg = ("Could not reach the update address. Check your internet "
-                       f"connection. You are on version {APP_VERSION_DISPLAY}.")
-            elif str(result.get('error', '')).startswith('http_'):
-                code = result.get('error').split('_', 1)[1]
-                msg = (f"The update address answered with an error, {code}. You are on "
-                       f"version {APP_VERSION_DISPLAY}.")
-            else:
-                msg = (f"Could not read the update address. You are on version "
-                       f"{APP_VERSION_DISPLAY}.")
-            self._set_update_result(msg, speak=True)
+            # Kept to one short line on purpose. There is nothing useful this app can add
+            # about a network problem, and whoever wants to reach the website can open their
+            # own browser, which will explain itself far better than this could.
+            self._set_update_result("Could not check for updates.", speak=True)
             notify_event("update_checked", "Update check finished", 300, 150)
             return
 
         latest = result.get('latest', '')
         if not result.get('newer'):
-            msg = f"You are on the latest version, {APP_VERSION_DISPLAY}."
-            self._set_update_result(msg, speak=True)
+            self._set_update_result(f"You are on the latest version, {APP_VERSION_DISPLAY}.",
+                                    speak=True)
             notify_event("update_checked", "Update check finished", 300, 150)
             return
 
-        # A newer version exists. Offer the page rather than downloading anything, because
-        # installing over a running audio app is not something to do behind someone's back.
         self._offer_update_page(latest)
 
     def _offer_update_page(self, latest):
         """Tells the user a newer version exists and offers to open the page for it."""
-        msg = (f"A newer version is available. You are on {APP_VERSION_DISPLAY} and "
-               f"{latest} has been released.")
+        msg = f"New version available: {latest}"
         self._set_update_result(msg, speak=True)
 
         dlg = wx.MessageDialog(
             self,
-            f"{msg}\n\nOpening the download page in your web browser?\n\n"
-            "Nothing is downloaded or installed by this app. You decide what happens next.",
+            f"{msg}\n\nOpen the download page in your browser?",
             "Update Available",
             wx.YES_NO | wx.ICON_INFORMATION)
         answer = dlg.ShowModal()
@@ -3109,8 +3081,7 @@ class ZMicStudioFrame(wx.Frame):
             log.info(f"Launch update check could not reach the address: {result.get('error')}")
             return
         if result.get('newer'):
-            latest = result.get('latest', '')
-            msg = f"A newer version is available. You are on {APP_VERSION_DISPLAY} and {latest} has been released."
+            msg = f"New version available: {result.get('latest', '')}"
         else:
             msg = f"You are on the latest version, {APP_VERSION_DISPLAY}."
         self._set_update_result(msg, speak=True)
