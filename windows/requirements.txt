@@ -3,15 +3,14 @@
 
 # --- Required ---
 wxPython>=4.2          # Accessible GUI framework (Win32 native controls)
-numpy>=1.24            # Vector DSP engine
+numpy>=1.24            # Vector DSP engine, and the 80Hz rumble cut (a windowed-sinc FIR).
+                       # scipy used to be required for that one filter. It cost 109MB and
+                       # 45 minutes of build time, so it was replaced with numpy alone.
 sounddevice>=0.4       # WASAPI capture / playback via PortAudio
 
 # --- Recommended ---
-scipy>=1.10            # 80Hz rumble-cut filter (signal.butter / sosfilt).
-                        # Without it the low-cut is silently disabled; the rest of the
-                        # spectral denoise still works.
 accessible_output2>=0.3 # Screen-reader speech output for NVDA / JAWS / Narrator.
-                        # Falls back to SAPI via comtypes when absent.
+                          # Falls back to SAPI via comtypes when absent.
 
 # --- Windows speech fallback ---
 comtypes>=1.2          # SAPI.SpVoice fallback if accessible_output2 is unavailable

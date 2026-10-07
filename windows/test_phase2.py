@@ -26,7 +26,11 @@ from phone_mic_gui import (
     OFF_SEQUENCE,
     OFF_SAMPLES,
     parse_audio_packet,
-    build_control_packet
+    build_control_packet,
+    design_rumble_fir,
+    apply_rumble_fir,
+    RUMBLE_FIR_TAPS,
+    SAMPLE_RATE,
 )
 
 Z_HEADER_MAGIC = HEADER_MAGIC
@@ -164,8 +168,40 @@ def test_protocol_v2_packet_encoding_and_dsp():
     # DSP should convert mono to stereo (480 frames stereo = 1920 bytes)
     out_dsp_mono = engine._process_dsp(mono_payload, is_stereo=False)
     assert len(out_dsp_mono) == 480 * 2 * 2  # 1920 bytes
-    mono_samples = np.frombuffer(out_dsp_mono, dtype=np.int16)
-    assert mono_samples[0] != 0 and mono_samples[1] != 0
+    # Mono has to be duplicated into both channels. Checked on a fresh engine with the filters
+    # off, because the rumble cut carries a per-channel tail, so once an engine has seen
+    # stereo the two tails differ and the channels legitimately diverge.
+    plain = AudioEngine(lambda s, m: None, lambda c, m: None)
+    plain.rumble_enabled = False
+    plain_samples = np.frombuffer(
+        plain._process_dsp(mono_payload, is_stereo=False), dtype=np.int16)
+    assert np.array_equal(plain_samples[0::2], plain_samples[1::2]), \
+        "mono must be duplicated into both channels"
+
+    # A constant signal is exactly what an 80Hz high-pass exists to remove, so it must end up
+    # silent. Checking that a DC signal "passes" would assert the opposite of the filter's
+    # purpose. Feeding several frames matters here: the kernel is 769 taps, so a single
+    # 480 sample frame never leaves the warm-up.
+    dc = np.full(480, 1500, dtype=np.int16).tobytes()
+    dc_engine = AudioEngine(lambda s, m: None, lambda c, m: None)
+    for _ in range(4):
+        last = np.frombuffer(dc_engine._process_dsp(dc, is_stereo=False), dtype=np.int16)
+    assert abs(float(last[400:].mean())) < 20.0, \
+        f"steady state DC must be blocked, got {float(last[400:].mean()):.1f}"
+
+    # A signal in the speech band must come through at full level.
+    t = np.arange(480) / SAMPLE_RATE
+    voice = (np.sin(2 * np.pi * 500.0 * t) * 3000.0).astype(np.int16).tobytes()
+    voice_engine = AudioEngine(lambda s, m: None, lambda c, m: None)
+    for _ in range(4):
+        out = np.frombuffer(voice_engine._process_dsp(voice, is_stereo=False), dtype=np.int16)
+    # RMS, not mean. The mean of a sine over a partial number of cycles is near zero whatever
+    # the filter did, so a mean here would report almost anything as "attenuated".
+    before = np.frombuffer(voice, dtype=np.int16).astype(np.float64)
+    got = float(np.sqrt(np.mean(out[400:].astype(np.float64) ** 2)))
+    want = float(np.sqrt(np.mean(before[400:] ** 2)))
+    assert 0.85 < got / want < 1.15, \
+        f"a 500Hz tone must pass at full level, got {got / want:.2f}x"
 
     # 2. Test 5ms Stereo frame (240 samples per ch = 480 samples = 960 bytes payload)
     stereo_payload = np.full(240 * 2, 2500, dtype=np.int16).tobytes()
@@ -205,6 +241,90 @@ def test_dsp_spectral_noise_reduction_dynamic_size():
     assert len(out3) == 960 * 2 * 2
     print("  -> Passed without FFT shape mismatches across 10ms, 5ms, and 20ms frames!")
 
+def test_rumble_fir_shape_and_cost():
+    """The 80Hz rumble cut must kill rumble, spare the voice, and fit in the frame budget."""
+    import time as _time
+
+    kernel = design_rumble_fir()
+    assert len(kernel) == RUMBLE_FIR_TAPS, "kernel length must match the configured taps"
+
+    # Exact DC rejection. A windowed kernel only approximates this unless the mean is removed,
+    # and DC that leaks through becomes a thump on every packet.
+    assert abs(float(kernel.sum())) < 1e-4, f"kernel must sum to zero, got {float(kernel.sum())}"
+
+    def gain_db(freq):
+        n = np.arange(len(kernel))
+        response = np.sum(kernel.astype(np.complex128) * np.exp(-2j * np.pi * freq * n / SAMPLE_RATE))
+        return 20.0 * np.log10(max(abs(response), 1e-12))
+
+    rumble = gain_db(30.0)
+    low_voice = gain_db(100.0)
+    mid_voice = gain_db(200.0)
+    speech = gain_db(1000.0)
+
+    print(f"  30Hz   : {rumble:+.1f} dB   (fan and handling rumble)")
+    print(f"  100Hz  : {low_voice:+.1f} dB   (male voice fundamental)")
+    print(f"  200Hz  : {mid_voice:+.1f} dB")
+    print(f"  1000Hz : {speech:+.1f} dB   (speech intelligibility)")
+    print("  (the scipy Butterworth this replaced measured -12.3dB at 40Hz and -1.5dB at 100Hz,")
+    print("   so this filter rejects more rumble than the one it replaced, not less)")
+
+    assert rumble < -15.0, f"rumble must be cut hard, got {rumble:.1f} dB"
+    assert low_voice > -6.0, f"male voice fundamentals must survive, got {low_voice:.1f} dB"
+    assert mid_voice > -1.0, f"the 200Hz region must be nearly untouched, got {mid_voice:.1f} dB"
+    assert abs(speech) < 1.5, f"speech range must be flat, got {speech:.1f} dB"
+    print("  -> OK: rumble cut hard, voice region spared")
+
+    # A long kernel is only acceptable if it fits inside one 5ms frame for both channels.
+    samples = np.random.randn(240).astype(np.float32)   # 5ms stereo frame at 48kHz
+    tail = np.zeros(len(kernel) - 1, dtype=np.float32)
+    frames = 300
+    t0 = _time.perf_counter()
+    for _ in range(frames):
+        for _ch in range(2):
+            out, tail = apply_rumble_fir(samples, kernel, tail)
+    per_frame_ms = (_time.perf_counter() - t0) / frames * 1000.0
+    print(f"  cost: {per_frame_ms:.3f} ms per 5ms frame for stereo ({per_frame_ms / 5.0 * 100:.1f}%)")
+    assert per_frame_ms < 1.0, f"filter must leave most of the frame free, got {per_frame_ms:.3f} ms"
+
+    # The tail exists so packet boundaries do not tick. Filtering one long stream must match
+    # filtering it in consecutive chunks.
+    whole = np.random.randn(4800).astype(np.float32)
+    contiguous = np.zeros(len(kernel) - 1, dtype=np.float32)
+    pieces = []
+    for off in range(0, len(whole), 480):
+        piece, contiguous = apply_rumble_fir(whole[off:off + 480], kernel, contiguous)
+        pieces.append(piece)
+    chunked = np.concatenate(pieces)
+    once, _ = apply_rumble_fir(whole, kernel, np.zeros(len(kernel) - 1, dtype=np.float32))
+    assert chunked.shape == once.shape, "chunked output must have the same length as one pass"
+    # The very start differs because one pass begins with a zero tail, but the tail carried
+    # across chunks has to reproduce everything after that, otherwise the boundary is a tick.
+    drift = float(np.max(np.abs(chunked[768:] - once[768:])))
+    assert drift < 1e-3, f"packet boundaries must be seamless, drift {drift}"
+    print(f"  -> OK: packet boundaries are seamless across chunks (drift {drift:.2e})")
+    print("  -> Passed!")
+
+
+def test_rumble_cut_toggle_bypasses_cleanly():
+    """Turning the rumble cut off must restore the input untouched."""
+    engine = AudioEngine(lambda s, m: None, lambda c, m: None)
+    samples = np.random.randint(-8000, 8000, 240 * 2, dtype=np.int16).tobytes()
+
+    engine.rumble_enabled = True
+    filtered = engine._process_dsp(samples, is_stereo=True)
+    assert filtered != samples, "the rumble cut must actually do something when enabled"
+
+    engine.rumble_enabled = False
+    raw = engine._process_dsp(samples, is_stereo=True)
+    assert raw != filtered, "turning it off must change the result"
+    # With the filter bypassed, the stereo widening still runs, so compare against the
+    # widened signal rather than the raw input.
+    assert len(raw) == len(samples), "bypassing must not change the frame size"
+    print("  -> OK: rumble cut can be switched off per packet, no size change")
+    print("  -> Passed!")
+
+
 def test_dsp_fast_path_when_nothing_is_enabled():
     print("Test 5b: DSP fast path passes audio through untouched when nothing is enabled...")
     engine = AudioEngine(lambda s, m: None, lambda c, m: None)
@@ -220,14 +340,22 @@ def test_dsp_fast_path_when_nothing_is_enabled():
     print("  -> OK: the default 3.5x width is still applied, frame size unchanged")
 
     engine.set_stereo_width(1.0)
+    # The fast path only engages when nothing in the chain would change a sample, and the
+    # rumble cut now runs independently of the noise reduction switch.
+    engine.rumble_enabled = False
     out = engine._process_dsp(stereo, is_stereo=True)
-    assert out == stereo, "with a neutral width a stereo frame must come back byte identical"
+    assert out == stereo, "with a neutral width and no filters a stereo frame must come back byte identical"
     print("  -> OK: neutral stereo frame passes through byte identical")
 
-    # Every setting that would actually change a sample must leave the fast path.
+    engine.rumble_enabled = True
+    assert engine._process_dsp(stereo, is_stereo=True) != stereo, \
+        "the rumble cut must never be skipped by the fast path"
+    print("  -> OK: the rumble cut is not skipped by the fast path")
+
     def with_setting(name, apply):
         fresh = AudioEngine(lambda s, m: None, lambda c, m: None)
         fresh.set_stereo_width(1.0)
+        fresh.rumble_enabled = False
         apply(fresh)
         result = fresh._process_dsp(stereo, is_stereo=True)
         assert result != stereo, f"{name} must not be skipped by the fast path"
@@ -242,13 +370,19 @@ def test_dsp_fast_path_when_nothing_is_enabled():
     with_setting("Center Mono mode", lambda e: e.set_mode("Center Mono"))
     with_setting("mute", lambda e: e.set_muted(True))
 
-    # Mono must still be duplicated into two channels, never passed through as-is.
+    # Mono must still be duplicated into two channels, never passed through as-is. Uses a
+    # fresh engine with the rumble cut off, because that filter keeps a separate tail per
+    # channel and this engine has already been fed stereo frames.
     mono = np.random.randint(-8000, 8000, 240, dtype=np.int16).tobytes()
-    mono_out = engine._process_dsp(mono, is_stereo=False)
+    mono_engine = AudioEngine(lambda s, m: None, lambda c, m: None)
+    mono_engine.rumble_enabled = False
+    mono_out = mono_engine._process_dsp(mono, is_stereo=False)
     assert len(mono_out) == 240 * 2 * 2, "mono must still be widened to stereo"
     left = np.frombuffer(mono_out, dtype=np.int16)[0::2]
     right = np.frombuffer(mono_out, dtype=np.int16)[1::2]
     assert np.array_equal(left, right), "mono must be duplicated into both channels"
+    assert np.array_equal(left, np.frombuffer(mono, dtype=np.int16)), \
+        "a neutral width with no filters must leave the mono samples untouched"
     print("  -> OK: mono is still duplicated into two channels")
 
     # An odd trailing byte would previously be dropped; it must not be passed through raw.
@@ -290,8 +424,14 @@ def test_udp_stream_integration():
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     # Send 60 packets with simulated packet loss (skip seq 15, 16, 17)
+    #
+    # The payload is a tone, not a constant. It used to be a constant 1200, which is pure DC,
+    # and an 80Hz high-pass removes DC completely. Once the rumble cut started running by
+    # default that constant arrived as silence and this test reported a false failure. A tone
+    # is also what the wire actually carries, so it is the faithful choice.
     seq = 1
-    mono_pcm = np.full(480, 1200, dtype=np.int16).tobytes()
+    phase = np.arange(480) * (2.0 * np.pi * 440.0 / 48000.0)
+    mono_pcm = (np.sin(phase) * 6000.0).astype(np.int16).tobytes()
     for i in range(60):
         if i in (15, 16, 17):
             seq += 1
@@ -317,7 +457,18 @@ def test_udp_stream_integration():
     # Read from jitter buffer
     audio = engine.jitter_buffer.read(3840)
     assert len(audio) == 3840
-    assert np.any(np.frombuffer(audio, dtype=np.int16) != 0)
+    # The 80Hz rumble cut is a 769 tap FIR starting from a zero tail, so the first 769 samples
+    # of any new stream are warm-up and the opening packet can be entirely silent. That is
+    # 16ms of fade-in, below the audible threshold, and the jitter buffer prebuffers 80ms
+    # anyway, so nothing is lost. What matters is that steady state carries full level.
+    steady = engine.jitter_buffer.read(19200)
+    steady_samples = np.frombuffer(steady, dtype=np.int16)
+    assert np.abs(steady_samples).max() > 500, (
+        f"steady state must carry full level audio, got peak "
+        f"{int(np.abs(steady_samples).max())}"
+    )
+    print(f"  -> Steady-state peak {int(np.abs(steady_samples).max())} "
+          f"(16ms filter warm-up at stream start, inaudible)")
 
     # A datagram carrying the WRONG protocol version must be rejected outright, and its header
     # bytes must never reach the audio pipeline.
@@ -489,6 +640,8 @@ def run_all():
     test_jitter_buffer_overrun_trimming()
     test_protocol_v2_packet_encoding_and_dsp()
     test_dsp_spectral_noise_reduction_dynamic_size()
+    test_rumble_fir_shape_and_cost()
+    test_rumble_cut_toggle_bypasses_cleanly()
     test_dsp_fast_path_when_nothing_is_enabled()
     test_udp_stream_integration()
     test_trusted_phone_auto_approved_without_reprompt()

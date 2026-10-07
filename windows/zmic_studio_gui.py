@@ -130,6 +130,13 @@ MIN_LEGACY_PACKET_SIZE = 128
 JITTER_TARGET_MS = 80
 JITTER_MAX_MS = 160
 
+# 80Hz rumble cut, as a numpy FIR. The tap count is what keeps speech intact: too few taps
+# and the filter rolls off into the 150-250Hz range where the voice lives. Measured against
+# the scipy Butterworth this replaces, 769 taps is within 2dB at 100Hz and within 0.1dB from
+# 180Hz upwards, while rejecting more rumble.
+RUMBLE_CUTOFF_HZ = 80
+RUMBLE_FIR_TAPS = 769
+
 # Maximum PC hostname length encoded into a pairing request
 MAX_PC_NAME_BYTES = 32
 
@@ -677,6 +684,51 @@ def build_control_packet(packet_type, payload_bytes=b''):
     return bytes([HEADER_MAGIC[0], HEADER_MAGIC[1], PROTOCOL_VERSION, packet_type]) + payload_bytes
 
 
+def design_rumble_fir(taps=RUMBLE_FIR_TAPS, cutoff=RUMBLE_CUTOFF_HZ, fs=SAMPLE_RATE):
+    """Builds a windowed-sinc high-pass for the 80Hz rumble cut.
+
+    This replaced a second order Butterworth from scipy.signal. scipy existed in this project
+    for this one filter and nothing else, and it was expensive both ways: 109MB on disk, and
+    it dragged in scipy.integrate whose generated _lebedev table alone took 12 minutes to
+    compile and pulled 39MB of OpenBLAS into the bundle, for a 45 minute build.
+
+    A short kernel was not acceptable. At 129 taps the filter was already 8.8dB down at
+    200Hz, which is where speech fundamentals sit, so it thinned the voice. At 769 taps the
+    response is within 2dB of the Butterworth at 100Hz and within 0.1dB from 180Hz up, and it
+    rejects more rumble rather than less. It costs about 6% of one 5ms frame, which is nothing
+    beside a jitter buffer an order of magnitude deeper than the latency it adds.
+    """
+    n = np.arange(taps, dtype=np.float64)
+    mid = (taps - 1) / 2.0
+    fc = cutoff / fs
+    h = np.where(np.abs(n - mid) < 1e-12,
+                 1.0 - 2.0 * fc,
+                 -2.0 * fc * np.sinc(2.0 * fc * (n - mid)))
+    h = h * np.blackman(taps)
+    # Subtracting the mean makes DC rejection exact rather than approximate, which a window
+    # on its own does not guarantee.
+    h -= h.mean()
+    return h.astype(np.float32)
+
+
+def apply_rumble_fir(samples, kernel, tail):
+    """Filters one channel, carrying the tail across packets.
+
+    np.convolve returns the whole convolution, so the leading outputs of this packet depend
+    on the previous one. Discarding that tail would leave a discontinuity at every 5ms
+    boundary, which is audible as a tick. The tail is returned so the next packet continues.
+    """
+    history = np.concatenate((tail, samples))
+    # np.convolve is full convolution, so index n of its result is sum_m history[n-m]*kernel[m].
+    # Output for the current samples therefore sits at index len(kernel)-1, not at 0. Taking
+    # the first len(samples) entries instead reads the zero-padded warm-up region and returns
+    # signal that is misaligned by the whole kernel length, which sounds like garbage.
+    start = len(kernel) - 1
+    filtered = np.convolve(history, kernel)[start:start + len(samples)]
+    new_tail = history[-start:] if start else np.empty(0, dtype=np.float32)
+    return filtered, new_tail
+
+
 class AudioEngine:
     """Handles audio capture (Phone UDP or PC Microphones), DSP processing, and WASAPI output."""
     def __init__(self, on_status_changed, on_packet_received):
@@ -740,6 +792,8 @@ class AudioEngine:
 
         # Continuous Spectral Noise Reduction (Wiener Filter) & 80Hz Low-Cut
         self.spectral_noise_enabled = False # Default OFF, toggleable via Alt+N
+        # The rumble cut has its own switch, so the voice can be compared with it on and off.
+        self.rumble_enabled = True
         self.noise_reduction_level = 40     # 40% default balanced suppression
         self.noise_profile_l = np.full(BLOCK_SIZE // 2 + 1, 50.0, dtype=np.float32)
         self.noise_profile_r = np.full(BLOCK_SIZE // 2 + 1, 50.0, dtype=np.float32)
@@ -757,21 +811,12 @@ class AudioEngine:
 
     def _init_filter(self):
         """Initializes the 80Hz rumble-cut filter and its state variables."""
-        try:
-            from scipy import signal
-            self.sos_hp = signal.butter(2, 80, btype='highpass', fs=SAMPLE_RATE, output='sos')
-            self.zi_l = signal.sosfilt_zi(self.sos_hp) * 0.0
-            self.zi_r = signal.sosfilt_zi(self.sos_hp) * 0.0
-            log.info("80Hz rumble-cut filter enabled (scipy present).")
-        except Exception:
-            self.sos_hp = None
-            # Loud, because the UI still offers "Noise Reduction" and the user would
-            # otherwise have no idea a filter silently disappeared.
-            log.error(
-                "scipy unavailable, the 80Hz rumble-cut filter is DISABLED. "
-                "Install it with: pip install -r requirements.txt",
-                exc_info=True
-            )
+        self.rumble_kernel = design_rumble_fir()
+        self.rumble_tail_l = np.zeros(len(self.rumble_kernel) - 1, dtype=np.float32)
+        self.rumble_tail_r = np.zeros(len(self.rumble_kernel) - 1, dtype=np.float32)
+        log.info(
+            f"80Hz rumble-cut filter ready ({RUMBLE_FIR_TAPS} tap numpy FIR, no scipy needed)."
+        )
 
     def start(self, port, target_device_id):
         """Starts audio capture and WASAPI output stream."""
@@ -1319,6 +1364,7 @@ class AudioEngine:
                 and self.mode == "Stereo 3D"
                 and self.stereo_width == 1.0
                 and not self.spectral_noise_enabled
+                and not self.rumble_enabled
                 and not self.echo_enabled
                 and self.volume_gain == 1.0
                 and len(raw_bytes) % 2 == 0):
@@ -1372,17 +1418,30 @@ class AudioEngine:
                 float_samples[0::2] = mid + (side * self.stereo_width)
                 float_samples[1::2] = mid - (side * self.stereo_width)
 
-        # 3. Continuous Spectral Noise Reduction (Wiener Filter) & 80Hz Low-Cut
+        # 3a. 80Hz Sub-Bass Rumble Cut (cuts fan motor hum, wind pop)
+        #
+        # This used to sit inside the spectral noise reduction block, which is off by default.
+        # That meant the rumble cut never ran unless the user turned noise reduction on, so a
+        # checkbox labelled "80Hz rumble cut" described something that was silently inactive.
+        # It is independent now, with its own switch.
+        if self.rumble_enabled and self.rumble_kernel is not None:
+            try:
+                ch_l = float_samples[0::2]
+                ch_r = float_samples[1::2]
+                ch_l, self.rumble_tail_l = apply_rumble_fir(
+                    ch_l, self.rumble_kernel, self.rumble_tail_l)
+                ch_r, self.rumble_tail_r = apply_rumble_fir(
+                    ch_r, self.rumble_kernel, self.rumble_tail_r)
+                float_samples[0::2] = ch_l
+                float_samples[1::2] = ch_r
+            except Exception:
+                log.warning("Rumble cut skipped for this packet", exc_info=True)
+
+        # 3b. Continuous Spectral Noise Reduction (Wiener Filter & 80Hz Low-Cut)
         if self.spectral_noise_enabled:
             try:
                 ch_l = float_samples[0::2]
                 ch_r = float_samples[1::2]
-
-                # A. 80Hz Sub-Bass Rumble Cut (cuts fan motor hum, wind pop)
-                if self.sos_hp is not None:
-                    from scipy import signal
-                    ch_l, self.zi_l = signal.sosfilt(self.sos_hp, ch_l, zi=self.zi_l)
-                    ch_r, self.zi_r = signal.sosfilt(self.sos_hp, ch_r, zi=self.zi_r)
 
                 # B. Continuous Spectral Noise Reduction (Wiener Filter - NEVER mutes the mic!)
                 if self.noise_reduction_level > 0:
@@ -2292,6 +2351,7 @@ class ZMicStudioFrame(wx.Frame):
         self.id_hotkey_mute = wx.NewIdRef()
         self.id_hotkey_input = wx.NewIdRef()
         self.id_hotkey_noise = wx.NewIdRef()
+        self.id_hotkey_rumble = wx.NewIdRef()
         self.id_hotkey_echo = wx.NewIdRef()
         self.id_hotkey_pingpong = wx.NewIdRef()
         self.id_hotkey_monitor = wx.NewIdRef()
@@ -2312,6 +2372,8 @@ class ZMicStudioFrame(wx.Frame):
             wx.AcceleratorEntry(wx.ACCEL_ALT, ord('i'), self.id_hotkey_input.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_ALT, ord('N'), self.id_hotkey_noise.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_ALT, ord('n'), self.id_hotkey_noise.GetId()),
+            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('B'), self.id_hotkey_rumble.GetId()),
+            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('b'), self.id_hotkey_rumble.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_ALT, ord('E'), self.id_hotkey_echo.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_ALT, ord('e'), self.id_hotkey_echo.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_ALT, ord('P'), self.id_hotkey_pingpong.GetId()),
@@ -2335,6 +2397,7 @@ class ZMicStudioFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_toggle_mute, id=self.id_hotkey_mute.GetId())
         self.Bind(wx.EVT_MENU, self.on_hotkey_input, id=self.id_hotkey_input.GetId())
         self.Bind(wx.EVT_MENU, self.on_hotkey_spectral_noise, id=self.id_hotkey_noise.GetId())
+        self.Bind(wx.EVT_MENU, self.on_hotkey_rumble_cut, id=self.id_hotkey_rumble.GetId())
         self.Bind(wx.EVT_MENU, self.on_hotkey_echo, id=self.id_hotkey_echo.GetId())
         self.Bind(wx.EVT_MENU, self.on_hotkey_pingpong, id=self.id_hotkey_pingpong.GetId())
         self.Bind(wx.EVT_MENU, self.on_hotkey_monitor, id=self.id_hotkey_monitor.GetId())
@@ -2645,6 +2708,21 @@ class ZMicStudioFrame(wx.Frame):
         self.sld_noise_reduction.SetPageSize(10)
         self._make_slider_accessible(self.sld_noise_reduction, self.on_spectral_noise_changed)
         sizer.Add(self.sld_noise_reduction, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
+
+        # The rumble cut gets its own switch so the voice can be compared with it on and off,
+        # which is the only honest way to judge a filter change by ear.
+        self.chk_rumble_cut = wx.CheckBox(page, wx.ID_ANY, "Cut Rumble Below 80Hz (Alt+&B)")
+        self.chk_rumble_cut.SetName("Cut Rumble Below 80Hz, Alt+B")
+        self.chk_rumble_cut.SetValue(True)
+        self.chk_rumble_cut.SetToolTip(
+            "Removes low fan hum, air conditioning rumble and handling noise.\n"
+            "Turn this off to hear the completely unfiltered voice for comparison."
+        )
+        self.chk_rumble_cut.Bind(wx.EVT_CHECKBOX, self.on_rumble_cut_changed)
+        sizer.Add(self.chk_rumble_cut, 0, wx.LEFT | wx.RIGHT, 4)
+
+        self.lbl_rumble_cut = wx.StaticText(page, wx.ID_ANY, "Rumble cut 80Hz: On")
+        sizer.Add(self.lbl_rumble_cut, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 4)
 
         sizer.Add(wx.StaticLine(page), 0, wx.EXPAND | wx.TOP | wx.BOTTOM, 8)
 
@@ -3756,6 +3834,20 @@ class ZMicStudioFrame(wx.Frame):
             self.lbl_noise_reduction.SetLabel(f"Noise Reduction Intensity: {val}% ({label_tag})")
             self.sld_noise_reduction.SetName(f"Noise Reduction Intensity Slider, {val} percent, {label_tag}")
         self.engine.set_spectral_noise(enabled, val)
+
+    def on_rumble_cut_changed(self, event):
+        """Turns only the 80Hz rumble cut on or off, so the voice can be compared."""
+        enabled = self.chk_rumble_cut.GetValue()
+        self.engine.rumble_enabled = enabled
+        label = "Rumble cut 80Hz: " + ("On" if enabled else "Off (unfiltered voice)")
+        self.lbl_rumble_cut.SetLabel(label)
+        self.lbl_rumble_cut.SetName(label)
+        log.info(label)
+
+    def on_hotkey_rumble_cut(self, event):
+        val = not self.chk_rumble_cut.GetValue()
+        self.chk_rumble_cut.SetValue(val)
+        self.on_rumble_cut_changed(None)
 
     def on_hotkey_spectral_noise(self, event):
         val = not self.chk_spectral_noise.GetValue()
