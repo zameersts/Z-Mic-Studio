@@ -141,3 +141,37 @@ These are decided but not started yet.
     competing with the UDP receiver thread for the GIL, and the jitter buffer depth.
 - Measured on 2026-10-07 after the paced sender fix: roughly 2 gaps per second in the
   30-90ms range, all in transit, with zero packet loss.
+
+
+## Firewall: already sorted, do not touch it
+
+Verified on 2026-10-07 with an elevated query. The Windows Firewall already contains
+inbound Allow rules for the interpreter this app runs under:
+
+    python.exe  C:\Users\Zameer\AppData\Local\Programs\Python\Python314\python.exe  Any UDP Inbound Allow Public
+    python.exe  ...\python.exe                                                          Any TCP Inbound Allow Public
+    pythonw.exe ...\pythonw.exe                                                         Any UDP Inbound Allow Public
+
+Both of this PC's networks are set to the `Public` profile, so the rules match.
+
+Two mistakes were made here and must not be repeated:
+
+1. `Get-NetFirewallRule` returns an empty result **unless the shell is elevated**. Reading
+   zero rules without elevation says nothing about whether rules exist. An earlier claim that
+   "no firewall rule exists" was based on an unelevated empty result and was wrong. Always
+   elevate before drawing any conclusion about the firewall.
+2. Because of that, an unnecessary script was written to add inbound rules for ports 8088
+   and 8089. It was deleted rather than run. Running it would have added redundant, narrower
+   rules on top of the existing broad ones.
+
+The mechanism the user noticed with TeamTalk5 is the ordinary one: Windows records an
+inbound Allow rule keyed on the executable, which is why such apps appear in the "Allow an app
+through Windows Firewall" list. That has already happened for python.exe here, so no action is
+required.
+
+If audio ever stops arriving, the firewall is not the first place to look. Check instead:
+whether the PC is holding two addresses in one subnet (a stale address on a disconnected
+Ethernet adapter used to sit at 192.168.100.2 while Wi-Fi was 192.168.100.5), and whether the
+phone is discarding the PC's packets because they arrive from an address other than the one it
+connected to.
+
