@@ -21,6 +21,7 @@ import wx
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import zmic_studio_gui as Z
+import update_check
 
 SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
 FAILURES = []
@@ -301,21 +302,31 @@ def test_terms_and_privacy():
     #    describes behaviour the app does not have is a lie to a screen reader user.
     check("checks for updates once a week" not in body,
           "privacy text no longer promises a weekly update check")
-    check("does not check for updates by itself" in body,
-          "privacy text states the app does not update itself")
+    check("never installs anything" in body,
+          "privacy text states the app never installs anything by itself")
 
     # The claim must be true, not just present. If an update checker is ever added, this
     # test is what should force these lines to be rewritten rather than left stale.
+    # There is an update checker now, so the wording has to describe what it actually does:
+    # one user-entered address, opt-in, downloads nothing, installs nothing.
+    check(update_check.check_for_update("", "0.9.0").get('error') == 'empty',
+          "an empty update address means no internet contact at all")
+    check("downloads nothing" in body or "never downloads anything" in body,
+          "privacy text says the check downloads nothing")
+    check("never installs anything" in body,
+          "privacy text says it never installs anything by itself")
+    check("address empty" in body,
+          "privacy text says an empty address means no internet use")
+
+    # The checker must be reachable only from the button, never on an ordinary launch.
+    # A screen-reader user cannot be shown an unrequested dialog without losing their place.
     with open(Z.__file__, encoding="utf-8") as fh:
-        app_src = fh.read()
-    has_update_code = any(token in app_src for token in (
-        "urlopen", "urlretrieve", "requests.get", "http.client", "check_for_update"
-    ))
-    check(not has_update_code,
-          "app really has no update checker, so the wording is honest",
-          f"(found update code: {has_update_code})")
-    check("does not connect to the internet" in body,
-          "privacy text makes the stronger, and true, claim")
+          app_src = fh.read()
+    check("check_for_update(" in app_src,
+          "the update check exists")
+    check("_background_update_check" not in app_src
+          and "CallLater" not in app_src.split("def on_check_updates")[0][-400:],
+          "no background update check runs on launch")
     check("vb-audio website" in body,
           "privacy text names the one web page the app can open")
 
@@ -1697,6 +1708,137 @@ def test_connect_honours_selection_when_nothing_is_running():
         frame.Destroy()
 
 
+def test_update_check_is_opt_in_and_installs_nothing():
+    """The update check must be silent until asked, and must never install anything."""
+    import threading as _threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    import update_check
+
+    check(update_check.check_for_update("", "0.9.0") == {"ok": False, "error": "empty"},
+          "an empty address does not attempt any connection at all")
+
+    # Versions, including the pre-release case that decides whether a beta user gets pushed
+    # onto a release.
+    check(update_check.is_newer("0.9.1", "0.9.0"), "a higher patch is newer")
+    check(update_check.is_newer("0.10.0", "0.9.9"), "0.10 is newer than 0.9.9, not older")
+    check(not update_check.is_newer("0.9.0", "0.9.1"), "a lower version is not newer")
+    check(not update_check.is_newer("0.9.1", "0.9.1"), "the same version is not newer")
+    check(not update_check.is_newer("0.9.1", "0.9.1-beta"),
+          "a release does not replace the beta of the same number")
+    check(not update_check.is_newer("not-a-version", "0.9.0"),
+          "an unparseable answer is refused rather than guessed at")
+
+    # Both response shapes a publish location realistically uses.
+    check(update_check.extract_version("0.9.1") == "0.9.1", "plain text version")
+    check(update_check.extract_version("0.9.1\n") == "0.9.1", "plain text with a newline")
+    check(update_check.extract_version('{"version": "0.9.2"}') == "0.9.2",
+          "JSON version field")
+    check(update_check.extract_version('{"tag_name": "v0.9.3"}') == "0.9.3",
+          "JSON tag field, as a release feed returns")
+    check(update_check.extract_version("<html>hello</html>") is None,
+          "an HTML page is not mistaken for a version")
+    check(update_check.extract_version("") is None, "an empty body yields nothing")
+
+    # Served over a real socket, so the request itself is exercised rather than mocked.
+    body = {"payload": '{"version": "0.9.9"}'}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body["payload"].encode())
+
+        def log_message(self, *a):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    thread = _threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        result = update_check.check_for_update(f"http://127.0.0.1:{port}/version", "0.9.0")
+        check(result.get("ok") and result.get("latest") == "0.9.9",
+              "a served version is read correctly", f"({result})")
+        check(result.get("newer") is True, "it is reported as newer")
+        result2 = update_check.check_for_update(f"http://127.0.0.1:{port}/version", "0.9.9")
+        check(result2.get("ok") and result2.get("newer") is False,
+              "the same version is reported as not newer")
+        # A bare host must not be treated as a scheme-less URL.
+        result3 = update_check.check_for_update(f"127.0.0.1:{port}/version", "0.9.0")
+        check(isinstance(result3, dict) and 'ok' in result3,
+              "a bare address is handled without crashing")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    # Nothing in the checker may install or download. Enforced on the source, because this is
+    # the one guarantee a user cannot verify by looking.
+    with open(update_check.__file__, encoding="utf-8") as fh:
+        u_src = fh.read()
+    for banned in ("urlretrieve", "requests.get", "subprocess", "os.startfile",
+                   "os.remove", "os.rename", "shutil"):
+        check(banned not in u_src, f"the update checker never uses '{banned}'")
+
+
+def test_firewall_only_asks_when_it_must():
+    """The firewall permission must be asked once per install path, never more."""
+    import firewall_rule as F
+
+    check(F.PORTS == (8088, 8089), "the two listening ports are the ones opened")
+    check(F.rule_name(8088) == "Z Mic Studio audio (UDP 8088)", "rule name includes the port")
+    check("Z Mic Studio audio (UDP " in F._netsh_add(8088, r"C:\\a b\\x.exe"),
+          "the rule is written for a specific program path")
+    check("profile=any" in F._netsh_add(8088, r"C:\\x.exe"),
+          "the rule covers every network profile, not only Private",
+          "a Private-only rule looks granted while letting nothing through")
+    check("protocol=UDP" in F._netsh_add(8088, r"C:\\x.exe"),
+          "only UDP is opened, the app never accepts TCP")
+    check("deldir" not in F._netsh_add(8088, r"C:\\x.exe")
+          and "delete rule" in F._netsh_add(8088, r"C:\\x.exe"),
+          "granting is idempotent, so a half-written rule is replaced not duplicated")
+    check("TCP" not in F._netsh_add(8088, r"C:\\x.exe"), "no TCP rule is created")
+
+    # Running from source, there is nothing to grant: the interpreter already has permission.
+    original_frozen = getattr(F.sys, "frozen", False)
+    try:
+        if not F.is_compiled():
+            check(F.target_executable() is None,
+                  "running from source asks for nothing, Python already has permission")
+            check(F.needs_grant({}) is False,
+                  "no prompt is needed when there is no executable of our own")
+            check("Not needed" in F.describe({}),
+                  "the About tab says the permission is not needed")
+    finally:
+        if original_frozen:
+            F.sys.frozen = original_frozen
+
+    # Pretend to be compiled, and confirm the decision keys on the exact path.
+    try:
+        F.sys.frozen = True
+        F.__compiled__ = None
+        exe = r"C:\\Program Files\\Z Mic Studio\\ZMicStudio.exe"
+        check(F.target_executable() is not None, "a compiled build has a path to grant")
+        check(F.needs_grant({}) is True, "a fresh compiled install asks once")
+        check(F.needs_grant({"firewall_granted_for": F.target_executable()}) is False,
+                "it does not ask again after a grant")
+        check(F.needs_grant({"firewall_granted_for": r"D:\\other\\ZMicStudio.exe"}) is True,
+              "moving to a new path asks again, because the old rule no longer matches")
+        check("granted" in F.describe({"firewall_granted_for": exe}),
+              "the About tab reports a granted permission")
+    finally:
+        if original_frozen:
+            F.sys.frozen = original_frozen
+        else:
+            del F.sys.frozen
+        del F.__compiled__
+
+    # Running the check on a nonexistent address must fail, not raise.
+    check(F.needs_grant({}) is False,
+          "back in source mode nothing is pending again")
+
+
 
 def run_all():
     print("=" * 60)
@@ -1720,6 +1862,8 @@ def run_all():
     test_phone_link_survives_mic_switch()
     test_user_choice_survives_phone_connect_and_disconnect()
     test_connect_honours_selection_when_nothing_is_running()
+    test_update_check_is_opt_in_and_installs_nothing()
+    test_firewall_only_asks_when_it_must()
     test_phone_accept_switches_input_to_phone()
     test_no_discovery_auto_connect()
     test_no_auto_start()

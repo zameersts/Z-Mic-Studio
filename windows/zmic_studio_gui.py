@@ -21,6 +21,8 @@ import struct
 import sounddevice as sd
 import wx
 import terms
+import firewall_rule
+from update_check import check_for_update
 
 def get_log_dir():
     appdata = os.environ.get('APPDATA')
@@ -2301,6 +2303,9 @@ class ZMicStudioFrame(wx.Frame):
 
         self.engine = AudioEngine(self.on_engine_status, self.on_engine_packets)
         self.engine.on_remote_mute = self._on_remote_mute_received
+        # Loaded here because the About tab reads the update address from it, and the
+        # firewall helpers compare against what is stored in it.
+        self.settings = terms.load_settings()
         self.devices, self.default_cable_idx = get_output_devices()
         if self.default_cable_idx != -1 and self.devices:
             self.target_cable_id = self.devices[self.default_cable_idx][0]
@@ -2899,8 +2904,183 @@ class ZMicStudioFrame(wx.Frame):
 
         sizer.Add(btn_sizer, 0, wx.ALL, 12)
 
+        # ---- Updates ----
+        # The address is a setting, never a constant in the code, so publishing the app
+        # somewhere new later does not need a rebuild. Until an address is filled in the check
+        # stays quiet, which is what makes it safe to leave the field empty for now.
+        self._build_update_section(page, sizer)
+
         page.SetSizer(sizer)
         return page
+
+    def _build_update_section(self, page, sizer):
+        """Adds the update check controls to the About tab."""
+        heading = wx.StaticText(page, wx.ID_ANY, "UPDATES")
+        heading.SetFont(heading.GetFont().Bold())
+        sizer.Add(heading, 0, wx.LEFT | wx.TOP, 12)
+
+        self.lbl_update_status = wx.StaticText(page, wx.ID_ANY, "")
+        self.lbl_update_status.SetForegroundColour(wx.Colour(90, 90, 90))
+        sizer.Add(self.lbl_update_status, 0, wx.LEFT | wx.TOP, 12)
+
+        self.txt_update_source = wx.TextCtrl(page, wx.ID_ANY, value=self.settings.get('update_source', ''))
+        self.txt_update_source.SetName("Update address, a web address or a repository link")
+        sizer.Add(self.txt_update_source, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 12)
+
+        hint = wx.StaticText(page, wx.ID_ANY,
+                             "Where new versions are announced. Leave empty to switch "
+                             "update checks off.")
+        hint.SetForegroundColour(wx.Colour(90, 90, 90))
+        sizer.Add(hint, 0, wx.LEFT | wx.RIGHT, 12)
+
+        btn_row = wx.BoxSizer(wx.HORIZONTAL)
+        self.btn_check_updates = wx.Button(page, wx.ID_ANY, "&Check for Updates")
+        self.btn_check_updates.SetName("Check for updates")
+        self.btn_check_updates.Bind(wx.EVT_BUTTON, self.on_check_updates)
+        btn_row.Add(self.btn_check_updates, 0)
+
+        self.btn_firewall = wx.Button(page, wx.ID_ANY, "&Windows Firewall")
+        self.btn_firewall.SetName("Windows Firewall permission, repair or remove")
+        self.btn_firewall.Bind(wx.EVT_BUTTON, self.on_firewall_repair)
+        btn_row.Add(self.btn_firewall, 0, wx.LEFT, 10)
+
+        sizer.Add(btn_row, 0, wx.ALL, 12)
+
+        self.lbl_firewall = wx.StaticText(page, wx.ID_ANY, "")
+        self.lbl_firewall.SetForegroundColour(wx.Colour(90, 90, 90))
+        sizer.Add(self.lbl_firewall, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+
+        self._refresh_update_labels()
+
+    def _refresh_update_labels(self):
+        """Re-reads the stored state and writes both status lines."""
+        source = self.settings.get('update_source', '').strip()
+        if source:
+            self.lbl_update_status.SetLabel(
+                "Last checked: never. Updates come from the address above.")
+        else:
+            self.lbl_update_status.SetLabel(
+                "Update checks are off. Add an address above to turn them on.")
+        self.lbl_update_status.SetName(self.lbl_update_status.GetLabel())
+
+        detail = firewall_rule.describe(self.settings)
+        self.lbl_firewall.SetLabel(detail)
+        self.lbl_firewall.SetName(detail)
+
+        target = firewall_rule.target_executable()
+        self.btn_firewall.Enable(target is not None)
+
+    def on_check_updates(self, event=None):
+        """Saves the update address and performs the check.
+
+        The check is deliberately quiet. A screen-reader user cannot be shown a dialog they
+        did not ask for without losing their place, so an ordinary launch never does this
+        automatically. The button is the whole interaction.
+        """
+        source = self.txt_update_source.GetValue().strip()
+        self.settings['update_source'] = source
+        terms.save_settings(self.settings)
+
+        if not source:
+            self.lbl_update_status.SetLabel("Update checks are off. No address is set.")
+            self.lbl_update_status.SetName(self.lbl_update_status.GetLabel())
+            return
+
+        self.lbl_update_status.SetLabel("Checking for updates...")
+        self.lbl_update_status.SetName("Checking for updates")
+        self.btn_check_updates.Disable()
+        try:
+            result = check_for_update(source, APP_VERSION_DISPLAY)
+        finally:
+            self.btn_check_updates.Enable()
+
+        if result.get('ok'):
+            found = result.get('latest', '')
+            if found and found != APP_VERSION_DISPLAY:
+                msg = (f"A newer version is available: {found}. "
+                       f"You are on {APP_VERSION_DISPLAY}.")
+            else:
+                msg = f"You are on the latest version, {APP_VERSION_DISPLAY}."
+        elif result.get('error') == 'empty':
+            msg = "That address did not return a version number."
+        else:
+            msg = "Could not reach that address."
+
+        self.lbl_update_status.SetLabel(msg)
+        self.lbl_update_status.SetName(msg)
+        self.settings['update_last_check'] = time.strftime('%Y-%m-%d %H:%M:%S')
+        terms.save_settings(self.settings)
+
+        # Saying it out loud matches the rest of the app, where anything that changes state
+        # is spoken rather than only shown.
+        speak_accessibility(msg)
+        notify_event("update_checked", "Update check finished", 300, 150)
+
+    def on_firewall_repair(self, event=None):
+        """Offers to add or remove the firewall permission, one press each.
+
+        Runs off the main thread because the elevated step waits on the user clicking the
+        Windows prompt, and blocking here would freeze the whole window behind it.
+        """
+        target = firewall_rule.target_executable()
+        if target is None:
+            return
+
+        granted = bool(firewall_rule.granted_path(self.settings))
+        if granted:
+            question = (
+                "The Windows Firewall permission is already set up for this copy.\n\n"
+                "Do you want to remove it? Doing so means the phone connects but no "
+                "sound arrives.")
+        else:
+            question = (
+                "Z Mic Studio needs Windows permission to receive audio from your phone.\n\n"
+                "Without it the phone connects, but no sound ever arrives and no error is "
+                "shown.\n\n"
+                "Add this permission now? Windows will ask you to confirm.")
+
+        dlg = wx.MessageDialog(self, question,
+                               "Windows Firewall Permission",
+                               wx.YES_NO | wx.ICON_QUESTION)
+        answer = dlg.ShowModal()
+        dlg.Destroy()
+        if answer != wx.ID_YES:
+            return
+
+        remove = granted
+        self.lbl_firewall.SetLabel("Waiting for Windows...")
+        self.lbl_firewall.SetName("Waiting for the Windows permission prompt")
+
+        def work():
+            if remove:
+                firewall_rule.revoke()
+            else:
+                status, _ = firewall_rule.ensure_rules(target)
+                if status == firewall_rule.GRANTED:
+                    self.settings['firewall_granted_for'] = target
+            terms.save_settings(self.settings)
+            wx.CallAfter(self._finish_firewall, remove)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _finish_firewall(self, removed):
+        # The removal has to clear the stored grant too, otherwise the app keeps believing it
+        # has permission and never asks again, while the firewall no longer has a rule.
+        if removed:
+            self.settings.pop('firewall_granted_for', None)
+            terms.save_settings(self.settings)
+            msg = "The Windows Firewall permission has been removed."
+        elif firewall_rule.needs_grant(self.settings):
+            msg = ("Permission was not added. The phone will connect but no sound will "
+                   "arrive until it is.")
+        else:
+            msg = "Windows Firewall now lets Z Mic Studio receive audio from your phone."
+        log.info(msg)
+        self._refresh_update_labels()
+        self.lbl_firewall.SetLabel(msg)
+        self.lbl_firewall.SetName(msg)
+        speak_accessibility(msg)
+        notify_event("firewall_set", "Firewall permission updated", 300, 150)
 
     def on_go_to_help_tab(self, event=None):
         """Moves to the Help tab, so the jump back is a button rather than a hunt."""
