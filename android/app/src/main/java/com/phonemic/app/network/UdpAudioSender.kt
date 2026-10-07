@@ -47,6 +47,13 @@ class UdpAudioSender(
     private var connectionStartTime = 0L
     private var hasReportedUnreachable = false
 
+    /**
+     * Address the PC is currently answering from. Starts as the address we connected to and
+     * is updated when the same PC is seen on a second local address.
+     */
+    @Volatile
+    private var peerAddress: InetAddress? = null
+
     @Volatile
     var activePcName: String = AudioConfig.DEFAULT_PC_NAME
         private set
@@ -88,6 +95,7 @@ class UdpAudioSender(
         hasReportedUnreachable = false
         consecutiveFailures = 0
         sequenceNumber = 0
+        peerAddress = resolved
 
         Log.i(TAG, "Streaming to $host:$port (${resolved.hostAddress}), protocol v${AudioConfig.PROTOCOL_VERSION}")
 
@@ -99,10 +107,30 @@ class UdpAudioSender(
                 try {
                     sock.receive(recvPacket)
 
-                    // Security: strictly ignore packets from any host other than our target.
-                    if (resolved != recvPacket.address) {
-                        Log.w(TAG, "Discarded control packet from unauthorized host ${recvPacket.address}")
-                        continue
+                    // A PC with two adapters in one subnet answers from whichever one the
+                    // route table picks. Plugging the Ethernet cable out does not remove its
+                    // address on Windows, so the PC can keep 192.168.100.2 on a dead adapter
+                    // while Wi-Fi is on 192.168.100.5, and both claim 192.168.100.0/24 with the
+                    // same metric. Rejecting the second address meant the phone threw away
+                    // every heartbeat, declared the PC gone after 2.5s and stopped streaming,
+                    // which the user experiences as the phone simply having no voice.
+                    //
+                    // So the peer address is remembered rather than fixed, and an address on
+                    // the same link is accepted and adopted. Anything else is still refused,
+                    // which keeps the check meaningful against an unrelated host.
+                    val from = recvPacket.address
+                    if (from != peerAddress) {
+                        if (isOnSameLink(from, resolved)) {
+                            Log.i(
+                                TAG,
+                                "PC is now answering from ${from.hostAddress}, previously " +
+                                    "${resolved.hostAddress}. Same link, accepting it."
+                            )
+                            peerAddress = from
+                        } else {
+                            Log.w(TAG, "Discarded control packet from unauthorized host ${from.hostAddress}")
+                            continue
+                        }
                     }
 
                     if (recvPacket.length < AudioConfig.MIN_PACKET_SIZE) continue
@@ -288,6 +316,7 @@ class UdpAudioSender(
             socket = null
             targetAddress = null
             reusablePacket = null
+            peerAddress = null
         }
 
         // Join the control receiver so it cannot mutate state belonging to a future session.
@@ -305,5 +334,24 @@ class UdpAudioSender(
 
     companion object {
         private const val TAG = "ZMicUdpSender"
+
+        /**
+         * True when [candidate] is an IPv4 host on the same /24 link as [reference].
+         *
+         * Only private and link-local addresses qualify, so a host out on the internet can
+         * never satisfy this however it routes. Someone already on the local network could,
+         * but such a host could equally spoof the exact PC address, so this does not weaken
+         * anything that the address check was actually protecting against.
+         */
+        private fun isOnSameLink(candidate: InetAddress, reference: InetAddress): Boolean {
+            val c = candidate.address
+            val r = reference.address
+            if (c.size != 4 || r.size != 4) return false
+            if (!candidate.isSiteLocalAddress && !candidate.isLinkLocalAddress) return false
+            for (i in 0..2) {
+                if (c[i] != r[i]) return false
+            }
+            return true
+        }
     }
 }
