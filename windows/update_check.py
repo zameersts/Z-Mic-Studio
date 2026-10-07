@@ -93,6 +93,14 @@ def extract_version(body):
     return None
 
 
+def _sibling_file(filename):
+    """Path to a file that lives beside the shipped address file."""
+    override = globals().get("_TEST_CONFIG_PATH")
+    if override:
+        return os.path.join(os.path.dirname(override), filename)
+    return os.path.join(app_directory(), filename)
+
+
 def app_directory():
     """The directory the app is installed in.
 
@@ -140,6 +148,32 @@ def read_configured_source():
     restarting is enough.
     """
     path = config_path()
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return line
+    except OSError:
+        return ""
+    return ""
+
+
+def release_page(source):
+    """The page to open when a newer version exists, or "" if it cannot be worked out.
+
+    A separate file next to the address, because "which URL do I open for a release" and "which
+    URL do I poll for a version number" are not always the same page. GitHub in particular
+    serves an API answer at one path and a human-readable page at another, and a single file
+    cannot be both.
+
+    Guessing is not an option here. Opening the wrong page for someone who cannot read the
+    screen quickly is worse than opening nothing, so an unrecognised address yields "" and the
+    caller says so out loud instead.
+    """
+    if not source:
+        return ""
+    path = _sibling_file("update_page.txt")
     try:
         with open(path, "r", encoding="utf-8-sig") as fh:
             for line in fh:

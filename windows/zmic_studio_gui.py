@@ -11,6 +11,7 @@ Provides a screen-reader friendly (NVDA compatible) tabbed interface for:
 import sys
 import os
 import time
+import webbrowser
 import socket
 import queue
 import threading
@@ -139,6 +140,11 @@ JITTER_MAX_MS = 160
 # 180Hz upwards, while rejecting more rumble.
 RUMBLE_CUTOFF_HZ = 80
 RUMBLE_FIR_TAPS = 769
+
+# How often the launch update check may run. One a week. Checking on every launch would mean a
+# network request every time the app is opened, which is rude on a metered connection and
+# would eventually get the update address rate limited or blocked outright.
+UPDATE_CHECK_INTERVAL_SECONDS = 7 * 24 * 60 * 60
 
 # Maximum PC hostname length encoded into a pairing request
 MAX_PC_NAME_BYTES = 32
@@ -2963,7 +2969,6 @@ class ZMicStudioFrame(wx.Frame):
 
         target = firewall_rule.target_executable()
         self.btn_firewall.Enable(target is not None)
-        self.btn_check_updates.Enable(bool(source))
 
     def on_check_updates(self, event=None):
         """Checks the shipped update address.
@@ -2979,39 +2984,136 @@ class ZMicStudioFrame(wx.Frame):
         """
         source = self.update_source
         if not source:
-            self.lbl_update_status.SetLabel("Update checks are off. No address is set.")
-            self.lbl_update_status.SetName(self.lbl_update_status.GetLabel())
+            # The button stays live even with nothing configured, because a button that cannot
+            # be pressed gives no explanation and looks broken. Answering here is more use than
+            # leaving the user guessing why nothing happens.
+            msg = ("This copy of Z Mic Studio was not given an update address, so there "
+                   "is nothing to check against. You are on version "
+                   f"{APP_VERSION_DISPLAY}, which is the version you have.")
+            self._set_update_result(msg, speak=True)
             return
 
-        self.lbl_update_status.SetLabel("Checking for updates...")
-        self.lbl_update_status.SetName("Checking for updates")
+        self._set_update_result("Checking for updates...", speak=False)
         self.btn_check_updates.Disable()
         try:
             result = check_for_update(source, APP_VERSION_DISPLAY)
         finally:
             self.btn_check_updates.Enable()
 
-        if result.get('ok'):
-            found = result.get('latest', '')
-            if found and found != APP_VERSION_DISPLAY:
-                msg = (f"A newer version is available: {found}. "
-                       f"You are on {APP_VERSION_DISPLAY}.")
-            else:
-                msg = f"You are on the latest version, {APP_VERSION_DISPLAY}."
-        elif result.get('error') == 'empty':
-            msg = "That address did not return a version number."
-        else:
-            msg = "Could not reach that address."
-
-        self.lbl_update_status.SetLabel(msg)
-        self.lbl_update_status.SetName(msg)
         self.settings['update_last_check'] = time.strftime('%Y-%m-%d %H:%M:%S')
         terms.save_settings(self.settings)
 
-        # Saying it out loud matches the rest of the app, where anything that changes state
-        # is spoken rather than only shown.
-        speak_accessibility(msg)
-        notify_event("update_checked", "Update check finished", 300, 150)
+        if not result.get('ok'):
+            # Every failure is named. "Something went wrong" is useless to someone who
+            # cannot see the screen and has to decide whether to try again or give up.
+            if result.get('error') == 'empty':
+                msg = "That address did not return a version number."
+            elif result.get('error') == 'no_version':
+                msg = ("That address answered, but not with a version number. It may be "
+                       f"the wrong page. You are on version {APP_VERSION_DISPLAY}.")
+            elif result.get('error') == 'unreachable':
+                msg = ("Could not reach the update address. Check your internet "
+                       f"connection. You are on version {APP_VERSION_DISPLAY}.")
+            elif str(result.get('error', '')).startswith('http_'):
+                code = result.get('error').split('_', 1)[1]
+                msg = (f"The update address answered with an error, {code}. You are on "
+                       f"version {APP_VERSION_DISPLAY}.")
+            else:
+                msg = (f"Could not read the update address. You are on version "
+                       f"{APP_VERSION_DISPLAY}.")
+            self._set_update_result(msg, speak=True)
+            notify_event("update_checked", "Update check finished", 300, 150)
+            return
+
+        latest = result.get('latest', '')
+        if not result.get('newer'):
+            msg = f"You are on the latest version, {APP_VERSION_DISPLAY}."
+            self._set_update_result(msg, speak=True)
+            notify_event("update_checked", "Update check finished", 300, 150)
+            return
+
+        # A newer version exists. Offer the page rather than downloading anything, because
+        # installing over a running audio app is not something to do behind someone's back.
+        self._offer_update_page(latest)
+
+    def _offer_update_page(self, latest):
+        """Tells the user a newer version exists and offers to open the page for it."""
+        msg = (f"A newer version is available. You are on {APP_VERSION_DISPLAY} and "
+               f"{latest} has been released.")
+        self._set_update_result(msg, speak=True)
+
+        dlg = wx.MessageDialog(
+            self,
+            f"{msg}\n\nOpening the download page in your web browser?\n\n"
+            "Nothing is downloaded or installed by this app. You decide what happens next.",
+            "Update Available",
+            wx.YES_NO | wx.ICON_INFORMATION)
+        answer = dlg.ShowModal()
+        dlg.Destroy()
+        if answer != wx.ID_YES:
+            return
+        page = update_check.release_page(self.update_source)
+        if page:
+            webbrowser.open_new_tab(page)
+            speak_accessibility("Opening the download page in your browser.")
+        else:
+            speak_accessibility("Could not work out the download page address.")
+
+    def _set_update_result(self, msg, speak=False):
+        """Writes the update status line and, when asked, says it out loud."""
+        self.lbl_update_status.SetLabel(msg)
+        self.lbl_update_status.SetName(msg)
+        if speak:
+            speak_accessibility(msg)
+
+    def _background_update_check(self):
+        """Checks for an update on launch without interrupting anything.
+
+        The user asked for this and it is the right instinct: most people never open an
+        About page, so an update nobody hears about is an update that never gets installed.
+
+        It is still deliberately quiet. No dialog, no focus change, nothing that would pull a
+        screen-reader user out of whatever they were reading. The result is written to the
+        status line and spoken once, both of which are free to ignore. The dialog only ever
+        appears from the button, where the press is unambiguous.
+
+        One check per week at most. Checking on every single launch would mean a network
+        request each time the app is opened, which is rude on a metered connection and would
+        eventually get the address rate limited.
+        """
+        if not self.update_source:
+            return
+        last = self.settings.get('update_last_check', '')
+        if last:
+            try:
+                if (time.time() - time.mktime(time.strptime(last, '%Y-%m-%d %H:%M:%S'))) \
+                        < UPDATE_CHECK_INTERVAL_SECONDS:
+                    return
+            except (ValueError, OverflowError):
+                pass
+
+        def work():
+            result = check_for_update(self.update_source, APP_VERSION_DISPLAY)
+            wx.CallAfter(self._finish_background_check, result)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _finish_background_check(self, result):
+        if self.IsBeingDeleted() or not self:
+            return
+        self.settings['update_last_check'] = time.strftime('%Y-%m-%d %H:%M:%S')
+        terms.save_settings(self.settings)
+        if not result.get('ok'):
+            # A silent launch check that cannot reach the network is not news. Saying so
+            # unprompted would be noise, and the button is there for when it matters.
+            log.info(f"Launch update check could not reach the address: {result.get('error')}")
+            return
+        if result.get('newer'):
+            latest = result.get('latest', '')
+            msg = f"A newer version is available. You are on {APP_VERSION_DISPLAY} and {latest} has been released."
+        else:
+            msg = f"You are on the latest version, {APP_VERSION_DISPLAY}."
+        self._set_update_result(msg, speak=True)
 
     def on_firewall_repair(self, event=None):
         """Offers to add or remove the firewall permission, one press each.
@@ -4218,6 +4320,10 @@ def main():
         frame = ZMicStudioFrame()
         frame.Show()
         log.info("GUI Frame shown, entering MainLoop...")
+        # Kicked off after the window is up, so the check never delays the app appearing. It is
+        # quiet by design: no dialog and no focus change, because a screen-reader user who is
+        # mid-sentence should not be pulled out of it by something they did not ask for.
+        wx.CallLater(2000, frame._background_update_check)
         app.MainLoop()
         log.info("MainLoop exited cleanly.")
         return 0
