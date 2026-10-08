@@ -33,6 +33,12 @@ object AppUpdateChecker {
         silent: Boolean = false,
         onComplete: ((UpdateResult?) -> Unit)? = null
     ) {
+        if (!silent) {
+            val checkingMsg = context.getString(R.string.update_checking)
+            Toast.makeText(context, checkingMsg, Toast.LENGTH_SHORT).show()
+            announceAccessibility(context, checkingMsg)
+        }
+
         thread(isDaemon = true, name = "UpdateCheckThread") {
             try {
                 val url = URL(GITHUB_LATEST_RELEASE_URL)
@@ -91,11 +97,9 @@ object AppUpdateChecker {
                         if (result.hasUpdate) {
                             showUpdateDialog(context, result)
                         } else if (!silent) {
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.update_latest, currentVersion),
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            val latestMsg = context.getString(R.string.update_latest, currentVersion)
+                            Toast.makeText(context, latestMsg, Toast.LENGTH_LONG).show()
+                            announceAccessibility(context, latestMsg)
                         }
                     }
                 } else {
@@ -118,12 +122,16 @@ object AppUpdateChecker {
         Handler(Looper.getMainLooper()).post {
             onComplete?.invoke(null)
             if (!silent) {
-                Toast.makeText(
-                    context,
-                    context.getString(R.string.update_error),
-                    Toast.LENGTH_SHORT
-                ).show()
+                val errorMsg = context.getString(R.string.update_error)
+                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                announceAccessibility(context, errorMsg)
             }
+        }
+    }
+
+    private fun announceAccessibility(context: Context, text: String) {
+        if (context is android.app.Activity) {
+            context.window?.decorView?.announceForAccessibility(text)
         }
     }
 

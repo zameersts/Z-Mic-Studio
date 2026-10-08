@@ -112,6 +112,7 @@
     <string name="update_available_msg">A new version of Z Mic Studio (%1$s) is available for Android.\n\nWould you like to download it now?</string>
     <string name="btn_download_update">Download Update</string>
     <string name="btn_later">Later</string>
+    <string name="update_checking">Checking for updates…</string>
     <string name="update_latest">You are on the latest version (%1$s).</string>
     <string name="update_error">Could not check for updates. Check internet connection.</string>
 </resources>

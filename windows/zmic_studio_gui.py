@@ -2977,46 +2977,58 @@ class ZMicStudioFrame(wx.Frame):
     def on_check_updates(self, event=None):
         """Checks the shipped update address.
 
-        The address is read from a file that comes with the app, never typed by the person
-        using it. A box asking a screen-reader user to paste a web address would be a puzzle
-        with no purpose, and it would put a decision that belongs to whoever publishes the app
-        into the hands of the person using it.
-
-        The check is also deliberately quiet. A screen-reader user cannot be shown a dialog
-        they did not ask for without losing their place, so an ordinary launch never does this
-        automatically. The button is the whole interaction.
+        Non-blocking in interactive mode, synchronous for headless unit tests.
+        Announces progress immediately without disabling the button, so screen
+        readers do not drop focus or discard speech queues.
         """
+        if getattr(self, "_is_checking_updates", False):
+            return
+
         source = self.update_source
         if not source:
             self._set_update_result("No update address set.", speak=True)
             return
 
-        self._set_update_result("Checking...", speak=False)
-        self.btn_check_updates.Disable()
-        try:
-            result = check_for_update(source, APP_VERSION_DISPLAY)
-        finally:
-            self.btn_check_updates.Enable()
+        self._is_checking_updates = True
+        self._set_update_result("Checking for updates...", speak=True)
 
-        self.settings['update_last_check'] = time.strftime('%Y-%m-%d %H:%M:%S')
-        terms.save_settings(self.settings)
+        is_test = not (wx.GetApp() and wx.GetApp().IsMainLoopRunning())
 
-        if not result.get('ok'):
-            # Kept to one short line on purpose. There is nothing useful this app can add
-            # about a network problem, and whoever wants to reach the website can open their
-            # own browser, which will explain itself far better than this could.
-            self._set_update_result("Could not check for updates.", speak=True)
-            notify_event("update_checked", "Update check finished", 300, 150)
-            return
+        def work():
+            try:
+                result = check_for_update(source, APP_VERSION_DISPLAY)
+            except Exception:
+                result = {"ok": False, "error": "exception"}
 
-        latest = result.get('latest', '')
-        if not result.get('newer'):
-            self._set_update_result(f"You are on the latest version, {APP_VERSION_DISPLAY}.",
-                                    speak=True)
-            notify_event("update_checked", "Update check finished", 300, 150)
-            return
+            def on_done():
+                self._is_checking_updates = False
+                if not self or (hasattr(self, 'IsBeingDeleted') and self.IsBeingDeleted()):
+                    return
 
-        self._offer_update_page(latest)
+                self.settings['update_last_check'] = time.strftime('%Y-%m-%d %H:%M:%S')
+                terms.save_settings(self.settings)
+
+                if not result.get('ok'):
+                    self._set_update_result("Could not check for updates.", speak=True)
+                    return
+
+                latest = result.get('latest', '')
+                if not result.get('newer'):
+                    self._set_update_result(f"You are on the latest version, {APP_VERSION_DISPLAY}.",
+                                            speak=True)
+                    return
+
+                self._offer_update_page(latest)
+
+            if is_test:
+                on_done()
+            else:
+                wx.CallAfter(on_done)
+
+        if is_test:
+            work()
+        else:
+            threading.Thread(target=work, daemon=True, name="UpdateCheckWorker").start()
 
     def _offer_update_page(self, latest):
         """Tells the user a newer version exists and offers to open the page for it."""

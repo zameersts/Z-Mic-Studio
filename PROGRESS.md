@@ -76,7 +76,10 @@
 - Help tab rewritten in plain English. Added getting started and troubleshooting.
 - Help text no longer uses dash bullets, because screen readers read them out loud.
 - Virtual Cable gate added earlier: no cable, no interface.
-- Code pushed to a private GitHub repository.
+- Installer updated to require Administrator privileges (PrivilegesRequired=admin) so Windows prompts with UAC dialog on launch.
+- Check for Updates accessibility overhauled on Windows: immediate speech on click, non-blocking background fetch, focus preservation, and removed conflicting double speech so NVDA cleanly speaks the result.
+- Check for Updates accessibility improved on Android: immediate feedback toast and TalkBack announceForAccessibility on check start and completion.
+- Published v0.9.3 release on GitHub (zameersts/Z-Mic-Studio-Releases) to enable live verification of update detection.
 
 ---
 
