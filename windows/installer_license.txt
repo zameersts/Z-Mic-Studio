@@ -1,0 +1,25 @@
+Z Mic Studio - License & Terms of Service
+Copyright (c) 2026 Zameer
+
+1. What Z Mic Studio Does
+Z Mic Studio turns your Android phone into a studio-grade microphone for your Windows PC over your local Wi-Fi network. Audio travels strictly over your local network between your phone and your computer.
+
+2. Acceptable Use
+Please do not use this app to:
+- Pretend to be another person or hide who you really are.
+- Record people without their permission.
+- Break any law, including local privacy and recording laws.
+The creator cannot be responsible for recordings you make with this software.
+
+3. Privacy
+- Your audio never leaves your local network. It is never uploaded to any cloud or third-party server.
+- This app has no user accounts, no advertising, no telemetry, and no tracking.
+- Updates are checked only against the official GitHub Releases page without sending personal information.
+
+4. License (MIT License)
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the condition that the above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY.
+
+Support: zameer.sstr@gmail.com
+Official Releases: https://github.com/zameersts/Z-Mic-Studio-Releases

@@ -17,6 +17,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import com.phonemic.app.audio.AudioConfig
+import com.phonemic.app.network.AppUpdateChecker
 
 /**
  * Accessible main Activity designed for Google TalkBack compatibility.
@@ -133,6 +134,9 @@ class MainActivity : Activity() {
         btnAbout.setOnClickListener { showAboutDialog() }
 
         checkPermissionsAndStartDiscovery()
+
+        // Background update check on launch (silent)
+        AppUpdateChecker.checkForUpdates(this, silent = true)
     }
 
     override fun onResume() {
@@ -433,6 +437,7 @@ class MainActivity : Activity() {
             .setTitle(R.string.dialog_about_title)
             .setView(scroll)
             .setPositiveButton(R.string.btn_email_support) { _, _ -> openEmailSupport() }
+            .setNeutralButton(R.string.btn_check_updates) { _, _ -> AppUpdateChecker.checkForUpdates(this, silent = false) }
             .setNegativeButton(R.string.btn_close, null)
             .show()
     }

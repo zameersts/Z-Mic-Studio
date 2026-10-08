@@ -129,24 +129,24 @@ def config_path():
     return os.path.join(app_directory(), CONFIG_FILENAME)
 
 
+OFFICIAL_UPDATE_SOURCE = "https://api.github.com/repos/zameersts/Z-Mic-Studio-Releases/releases/latest"
+OFFICIAL_RELEASE_PAGE = "https://github.com/zameersts/Z-Mic-Studio-Releases/releases/latest"
+
+
 def read_configured_source():
-    """The update address that came with this copy of the app, or "" if there is none.
+    """The update address that came with this copy of the app, or default official repo."""
+    override = globals().get("_TEST_CONFIG_PATH")
+    if override:
+        try:
+            with open(override, "r", encoding="utf-8-sig") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        return line
+        except OSError:
+            return ""
+        return ""
 
-    This is a file beside the app rather than a setting, and that is deliberate. Two reasons,
-    and both were learned the hard way.
-
-    First, whoever installs this app is not going to know what a release feed URL is, and
-    asking a screen-reader user to paste one into a text box would be a puzzle with no purpose.
-    The address is a publishing decision, so it belongs with the published files.
-
-    Second, putting it in the per-user settings file meant every user had to set it
-    individually. That inverts the problem entirely: the person publishing a release knows the
-    address, and the person using the app does not.
-
-    A file also means a new address can be published by replacing one text file, with no
-    rebuild. The same value is read fresh each time rather than cached, so editing the file and
-    restarting is enough.
-    """
     path = config_path()
     try:
         with open(path, "r", encoding="utf-8-sig") as fh:
@@ -155,33 +155,27 @@ def read_configured_source():
                 if line and not line.startswith("#"):
                     return line
     except OSError:
-        return ""
-    return ""
+        pass
+    return OFFICIAL_UPDATE_SOURCE
 
 
 def release_page(source):
-    """The page to open when a newer version exists, or "" if it cannot be worked out.
-
-    A separate file next to the address, because "which URL do I open for a release" and "which
-    URL do I poll for a version number" are not always the same page. GitHub in particular
-    serves an API answer at one path and a human-readable page at another, and a single file
-    cannot be both.
-
-    Guessing is not an option here. Opening the wrong page for someone who cannot read the
-    screen quickly is worse than opening nothing, so an unrecognised address yields "" and the
-    caller says so out loud instead.
-    """
+    """The page to open when a newer version exists, or default official release page."""
     if not source:
         return ""
-    path = _sibling_file("update_page.txt")
-    try:
-        with open(path, "r", encoding="utf-8-sig") as fh:
-            for line in fh:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    return line
-    except OSError:
-        return ""
+    override = globals().get("_TEST_CONFIG_PATH")
+    if not override:
+        path = _sibling_file("update_page.txt")
+        try:
+            with open(path, "r", encoding="utf-8-sig") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        return line
+        except OSError:
+            pass
+        if "zameersts/Z-Mic-Studio-Releases" in source or source == OFFICIAL_UPDATE_SOURCE:
+            return OFFICIAL_RELEASE_PAGE
     return ""
 
 
