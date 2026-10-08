@@ -1,8 +1,8 @@
 ; Inno Setup Script for Z Mic Studio
-; Produced for Zameer - Version 0.9.2
+; Produced for Zameer - Version 0.9.3
 
 #define MyAppName "Z Mic Studio"
-#define MyAppVersion "0.9.2"
+#define MyAppVersion "0.9.3"
 #define MyAppPublisher "Zameer"
 #define MyAppURL "https://github.com/zameersts/Z-Mic-Studio-Releases"
 #define MyAppExeName "ZMicStudio.exe"
@@ -17,7 +17,8 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName={commonpf}\{#MyAppName}
+UsePreviousAppDir=no
 DisableProgramGroupPage=yes
 LicenseFile=d:\PhoneMic\windows\installer_license.txt
 PrivilegesRequired=admin

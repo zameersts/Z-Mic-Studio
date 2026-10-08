@@ -31,9 +31,9 @@ android {
         applicationId = "com.phonemic.app"
         minSdk = 21
         targetSdk = 35
-        versionCode = 1
+        versionCode = 2
         // Must match APP_VERSION in windows/zmic_studio_gui.py
-        versionName = "0.9.2"
+        versionName = "0.9.3"
     }
 
     signingConfigs {

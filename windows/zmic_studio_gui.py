@@ -63,7 +63,7 @@ SAMPLE_RATE = 48000
 # Single source of truth for the product version. Must match versionName in
 # android/app/build.gradle.kts.
 APP_NAME = "Z Mic Studio"
-APP_VERSION = "0.9.2"
+APP_VERSION = "0.9.3"
 APP_VERSION_DISPLAY = "v" + APP_VERSION.replace("beta", "Beta")
 
 BLOCK_SIZE = 960  # output frames per callback = 20ms at 48kHz (960 frames x 2ch x 2B = 3840 B)
