@@ -9,8 +9,11 @@ The phone does the recording. The PC does the processing. Nothing passes through
 
 ## Get it
 
-Download the installer from the releases page and run it. Windows will ask once whether the app
-may receive connections, and you should say **Allow**. That step matters more than it looks:
+There is no public download. This repository and its releases are private, and the project is not
+being distributed publicly. The build is kept on the machine that made it.
+
+If you have a copy, unpack it and run `ZMicStudio.exe`. Windows will ask once whether the app may
+receive connections, and you should say **Allow**. That step matters more than it looks:
 
 > Without it the phone connects, the app says Connected, and no sound ever arrives. Nothing on
 > screen tells you why.
@@ -60,8 +63,9 @@ tolerates this, but it is worth removing anyway.
 
 No account. No advertising. No tracking, no analytics. Your audio never leaves your own devices.
 
-The app makes no internet connection at all unless you install a copy that was given an update
-address, and even then it only reads a version number. It never downloads or installs anything.
+This copy is shipped with no update address, so it makes no internet connection at all. If a
+build is ever given one, it would only read a version number. It never downloads or installs
+anything.
 
 **The audio is not encrypted.** It travels as plain PCM between the two devices. On a home
 network you control that is fine. On a network you do not, anyone able to see the traffic can

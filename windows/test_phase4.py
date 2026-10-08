@@ -315,8 +315,10 @@ def test_terms_and_privacy():
           "privacy text says the check downloads nothing")
     check("never installs anything" in body,
           "privacy text says it never installs anything by itself")
-    check("address empty" in body,
-          "privacy text says an empty address means no internet use")
+    check("no update address on this copy" in body,
+          "privacy text says this build makes no internet connection")
+    check("would read that one address" in body,
+          "privacy text still describes what a build with an address would do")
 
     with open(Z.__file__, encoding="utf-8") as fh:
         app_src = fh.read()
