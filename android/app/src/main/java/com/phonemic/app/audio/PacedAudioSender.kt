@@ -40,13 +40,13 @@ class PacedAudioSender(
         private const val TAG = "ZMicPacedSender"
 
         /**
-         * Frames allowed to wait. Four is 20ms at a 5ms frame, enough to absorb ordinary
-         * scheduling jitter without letting delay accumulate.
+         * Frames allowed to wait. Sixteen is 80ms at a 5ms frame, enough to absorb
+         * Android scheduling pauses and Wi-Fi bursts without discarding audio.
          */
-        private const val MAX_BACKLOG = 4
+        private const val MAX_BACKLOG = 16
 
         /** Longer than this and we are not scheduling jitter, we are behind. */
-        private const val LATE_TOLERANCE_FACTOR = 3L
+        private const val LATE_TOLERANCE_FACTOR = 8L
 
         private const val LOG_INTERVAL_NS = 10_000_000_000L
     }
@@ -170,12 +170,10 @@ class PacedAudioSender(
     private fun park(nanos: Long): Boolean {
         if (nanos <= 0) return running.get()
         return try {
-            // Short slices so close() is honoured promptly instead of after a whole frame.
-            var left = nanos
-            while (left > 0 && running.get()) {
-                val slice = minOf(left, 1_000_000L)
-                Thread.sleep(slice / 1_000_000L, (slice % 1_000_000L).toInt())
-                left -= slice
+            val millis = nanos / 1_000_000L
+            val remainderNanos = (nanos % 1_000_000L).toInt()
+            if (millis > 0 || remainderNanos > 0) {
+                Thread.sleep(millis, remainderNanos)
             }
             running.get()
         } catch (_: InterruptedException) {
