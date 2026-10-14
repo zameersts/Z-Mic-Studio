@@ -49,3 +49,7 @@ windows/bin/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Agent files
+.agents/
+AGENTS.md

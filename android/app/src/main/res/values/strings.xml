@@ -35,7 +35,7 @@
     <!-- Welcome Onboarding Screen -->
     <string name="welcome_title">Z Mic Studio</string>
     <string name="welcome_subtitle">Virtual Studio Microphone</string>
-    <string name="welcome_description">Z Mic Studio turns your smartphone into a studio-grade virtual microphone for your Windows PC. Created by Zameer. Enjoy crystal clear dual-mic stereo sound with screen reader accessibility.</string>
+    <string name="welcome_description">Z Mic Studio turns your smartphone into a studio-grade virtual microphone for your Windows PC. Created by Zameer. Enjoy crystal clear dual-mic stereo sound.</string>
     <string name="welcome_permission_title">Permissions Needed</string>
     <string name="welcome_permission_note">Microphone and Notification permissions are required to stream audio and receive connection requests from your PC.</string>
     <string name="welcome_permissions_granted">Permissions granted. Press Continue to open Z Mic Studio.</string>
@@ -90,17 +90,14 @@
     <string name="cd_open_settings">Open the system settings for Z Mic Studio</string>
     <string name="cd_view_terms">Read the Terms and Privacy</string>
     <string name="btn_about">About Z Mic Studio</string>
-    <!-- Support address is separate from the creator's personal email. -->
-    <string name="support_email">zameer.sstr@gmail.com</string>
-    <string name="support_email_subject">Z Mic Studio feedback</string>
+    <!-- Support & feedback link -->
+    <string name="support_issues_url">https://github.com/zameersts/Z-Mic-Studio/issues</string>
     <string name="dialog_about_title">About Z Mic Studio</string>
     <!-- %1$s is the version, read from the installed package. -->
-    <string name="about_body">Version %1$s\n\nCreated and designed by Zameer.\n\nZ Mic Studio turns your Android phone into a microphone for your Windows computer over your local Wi-Fi network.\n\nFeedback and support:\nzameer.sstr@gmail.com\n\nTapping Email Support opens your email app with this address filled in.</string>
-    <string name="btn_email_support">Email Support</string>
-    <string name="error_no_email_app">No email app was found on this phone.</string>
+    <string name="about_body">Version %1$s\n\nCreated and designed by Zameer.\n\nZ Mic Studio turns your Android phone into a microphone for your Windows computer over your local Wi-Fi network.\n\nFeedback and support:\nhttps://github.com/zameersts/Z-Mic-Studio/issues\n\nTapping GitHub Issues opens your browser to report issues or send feedback.</string>
+    <string name="btn_support_issues">GitHub Issues</string>
     <string name="cd_about">About Z Mic Studio. Shows the version, who made it, and how to send feedback.</string>
-    <!-- Spoken so a screen reader user knows the address is a mail app button, not a link. -->
-    <string name="cd_about_email">Email zameer.sstr at gmail dot com. Opens your email app.</string>
+    <string name="cd_about_issues">Open GitHub Issues in your browser</string>
     <!-- Content descriptions must repeat the visible label first, otherwise TalkBack
          announces a sentence that the user cannot see on screen. -->
     <string name="cd_forget_paired">Forget Paired PC. Removes the paired computer and needs a new connection</string>

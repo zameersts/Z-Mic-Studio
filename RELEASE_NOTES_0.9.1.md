@@ -76,6 +76,6 @@ devices.
 
 ## Reporting a problem
 
-Email zameer.sstr@gmail.com and say what you did, what you expected, and what happened
+Open an issue on GitHub at https://github.com/zameersts/Z-Mic-Studio/issues and say what you did, what you expected, and what happened
 instead. Attach the Troubleshooting Log from the Help tab if you can, it usually answers the
 question on its own.

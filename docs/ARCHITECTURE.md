@@ -2,7 +2,7 @@
 **Created & Designed by Zameer**
 
 ## Overview
-ZMic Studio transforms an Android smartphone into a low-latency, studio-fidelity virtual microphone for a Windows PC over local Wi-Fi. It features screen-reader accessibility for Google TalkBack and NVDA, zero-allocation audio streaming, continuous spectral noise reduction, and direct WASAPI virtual cable routing.
+ZMic Studio transforms an Android smartphone into a low-latency, studio-fidelity virtual microphone for a Windows PC over local Wi-Fi. It features zero-allocation audio streaming, continuous spectral noise reduction, and direct WASAPI virtual cable routing.
 
 ---
 

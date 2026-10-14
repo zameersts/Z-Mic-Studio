@@ -1,22 +1,19 @@
 # Z Mic Studio
 
-Turns an Android phone into a microphone for a Windows PC, over your own local network.
+Turns an Android phone into a high-quality microphone for a Windows PC over your local Wi-Fi network.
 
-Built for people who use a screen reader and who want a proper microphone for voice
-applications without holding a headset, where the noise of a room ends up in the recording.
+The phone does the recording, and the PC handles real-time audio processing and effects. Audio streams directly between your devices without passing through the internet.
 
-The phone does the recording. The PC does the processing. Nothing passes through the internet.
+## Downloads & Installation
 
-## Get it
+Pre-compiled production binaries are available on the official releases page:
 
-There is no public download. This repository and its releases are private, and the project is not
-being distributed publicly. The build is kept on the machine that made it.
+- **Windows Setup Installer (`.exe`)**: [Download from Releases](https://github.com/zameersts/Z-Mic-Studio-Releases/releases/latest)
+- **Android App (`.apk`)**: [Download from Releases](https://github.com/zameersts/Z-Mic-Studio-Releases/releases/latest)
 
-If you have a copy, unpack it and run `ZMicStudio.exe`. Windows will ask once whether the app may
-receive connections, and you should say **Allow**. That step matters more than it looks:
+When launching for the first time, Windows may prompt you once to allow network access through the firewall. Be sure to select **Allow** (or use the built-in firewall button on the About tab).
 
-> Without it the phone connects, the app says Connected, and no sound ever arrives. Nothing on
-> screen tells you why.
+> Without firewall permission, the phone connects, the status says Connected, but no audio will arrive.
 
 You also need the [VB-Audio Virtual Cable](https://vb-audio.com/Cable/), which is what lets
 other Windows applications treat your phone as an ordinary microphone. If it is missing, the app
@@ -33,15 +30,20 @@ opens the download page for you.
 
 | Key | Does |
 |---|---|
-| `Alt+R` | Start or stop the stream |
-| `Alt+I` | Move to the microphone list |
-| `Alt+M` | Mute |
-| `Alt+N` | Noise reduction |
-| `Alt+B` | 80Hz rumble cut |
-| `Alt+H` | Headphone monitoring |
+| `Ctrl+Alt+R` | Start or stop the stream |
+| `Ctrl+Alt+M` | Mute or unmute microphone |
+| `Ctrl+Alt+I` | Move to the microphone list |
+| `Ctrl+Alt+N` | Noise reduction |
+| `Ctrl+Alt+B` | 80Hz rumble cut |
+| `Ctrl+Alt+E` | Studio echo |
+| `Ctrl+Alt+P` | Ping-pong delay |
+| `Ctrl+Alt+H` | Headphone monitoring |
+| `Ctrl+Alt+A` | About window |
 | `Ctrl+Tab` | Next tab |
+| `Ctrl+Shift+Tab` | Previous tab |
+| `Ctrl+1` .. `5` | Direct jump to tabs 1 through 5 |
 
-Arrow keys move a slider, and every control carries a name a screen reader will read out.
+Arrow keys move sliders, and standard keyboard navigation works across all tabs and controls.
 
 ## If you cannot hear anything
 
@@ -52,20 +54,18 @@ The Troubleshooting Log on the Help tab usually answers this by itself. In order
 - **The virtual cable is not installed.** The app checks for it at launch and offers the
   download if it is missing.
 - **The phone stopped streaming.** It will say so on its own screen.
-- **The stream is muted.** `Alt+M`.
+- **The stream is muted.** `Ctrl+Alt+M`.
 
 If your phone appears but keeps dropping, the PC is probably holding two network addresses and
 answering from the wrong one. Unplugging a cable does not remove its address on Windows. Either
 unplug the cable properly, or turn Wi-Fi off in Windows when using Ethernet. The app now
 tolerates this, but it is worth removing anyway.
 
-## Privacy
+## Privacy & Updates
 
 No account. No advertising. No tracking, no analytics. Your audio never leaves your own devices.
 
-This copy is shipped with no update address, so it makes no internet connection at all. If a
-build is ever given one, it would only read a version number. It never downloads or installs
-anything.
+Z Mic Studio only contacts the internet when checking for updates via GitHub's public API (`https://api.github.com/repos/zameersts/Z-Mic-Studio-Releases/releases/latest`) to inform you if a newer version is available. It never transmits audio, user identifiers, telemetry, or private data.
 
 **The audio is not encrypted.** It travels as plain PCM between the two devices. On a home
 network you control that is fine. On a network you do not, anyone able to see the traffic can
@@ -102,6 +102,7 @@ All four must pass before a release.
 
 MIT. See [LICENSE](LICENSE), which also states plainly what is not finished yet.
 
-## Contact
+## Support & Feedback
 
-zameer.sstr@gmail.com
+For questions, feature requests, or bug reports, please open an issue on GitHub:
+[GitHub Issues](https://github.com/zameersts/Z-Mic-Studio/issues)

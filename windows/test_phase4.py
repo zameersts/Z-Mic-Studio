@@ -925,13 +925,11 @@ def test_about_reachable_and_complete():
               "the version is on the page", f"({Z.APP_VERSION_DISPLAY})")
         check("Zameer" in blob, "the creator is on the page")
 
-        # The address must be readable on screen AND spoken in words. Showing the
-        # word form on screen puts nonsense in front of the user, which is worse than
-        # a character by character reading.
-        check("zameer.sstr@gmail.com" in blob,
-              "the address on screen is a real, readable address")
-        check("at gmail dot com" not in blob,
-              "the spoken word form is not printed on the screen")
+        # The support link must be readable on screen.
+        check("https://github.com/zameersts/Z-Mic-Studio/issues" in blob,
+              "the issues link on screen is present")
+        check("github.com" in blob,
+              "github link is printed on the screen")
 
         # It must be focusable and read-only, so arrow keys move through the text and
         # nothing can be typed into it.
@@ -943,9 +941,9 @@ def test_about_reachable_and_complete():
         check(frame.txt_about.GetValue().count("\n") > 3,
               "the About body is laid out as separate lines")
 
-        email_label = frame.txt_about
-        check("zameer.sstr@gmail.com" in email_label.GetValue(),
-              "the address control carries the readable address")
+        support_label = frame.txt_about
+        check("https://github.com/zameersts/Z-Mic-Studio/issues" in support_label.GetValue(),
+              "the support control carries the GitHub issues URL")
 
         # Every label must also be readable by a screen reader, not just painted.
         unnamed = []
@@ -984,18 +982,16 @@ def test_about_reachable_and_complete():
         check(Z.APP_VERSION_DISPLAY in body,
               "the dialog shows the version", f"({Z.APP_VERSION_DISPLAY})")
         check("Zameer" in body, "the dialog names the creator")
-        check("zameer.sstr@gmail.com" in body,
-              "the dialog shows the support address")
+        check("https://github.com/zameersts/Z-Mic-Studio/issues" in body,
+              "the dialog shows the support URL")
 
-        # Spoken text must spell the address out, not read punctuation.
+        # Spoken text must announce support page cleanly.
         check(bool(spoken), "pressing About speaks the dialog")
         said = " ".join(spoken)
-        check("zameer.sstr at gmail dot com" in said,
-              "the address is spoken in words, not read character by character", f"({said})")
+        check("GitHub issues page" in said,
+              "the GitHub issues page is spoken", f"({said})")
         check("@" not in said,
-              "no raw @ symbol is spoken, which a screen reader mangles")
-        check("gmail dot com" not in said.replace("gmail dot com", ""),
-              "the address is not spoken twice")
+              "no raw @ symbol is spoken")
     finally:
         frame.on_close(None)
     print("  -> Passed!")

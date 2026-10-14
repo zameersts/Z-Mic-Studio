@@ -1,11 +1,11 @@
 """
-ZMic Studio Windows Companion - Accessible wxPython GUI
+ZMic Studio Windows Companion GUI
 Created & Designed by Zameer
-Provides a screen-reader friendly (NVDA compatible) tabbed interface for:
+Provides a high-performance tabbed interface for:
 - Connecting to the Android ZMic Studio stream over UDP or capturing PC Microphones.
 - Real-time DSP audio processing (Continuous Spectral Noise Reduction, Stereo 3D, Volume Gain, Studio Echo, Ping-Pong Delay).
 - Outputting directly into "CABLE Input (VB-Audio Virtual Cable)" via WASAPI.
-- Live microphone monitoring, global mute hotkeys, and accessible keyboard navigation.
+- Live microphone monitoring, global mute hotkeys, and full keyboard navigation.
 """
 
 import sys
@@ -165,7 +165,7 @@ VIRTUAL_SINK_HINTS = ('cable', 'voicemeeter', 'virtual', 'vac', 'line', 'vb-audi
 VB_CABLE_DOWNLOAD_URL = "https://vb-audio.com/Cable/"
 
 
-# Accessibility: NVDA / Screen Reader Speech & Non-blocking Audio Cues
+# Audio Feedback: Speech Notifications & Non-blocking Audio Cues
 _accessibility_speaker = None
 _accessibility_lock = threading.Lock()
 _last_spoken_text = ""
@@ -189,7 +189,7 @@ def get_accessibility_speaker():
         return _accessibility_speaker
 
 def speak_accessibility(text, interrupt=True):
-    """Speaks text via active screen reader (NVDA, JAWS, Narrator) asynchronously with deduplication."""
+    """Speaks spoken notification text asynchronously with deduplication."""
     global _last_spoken_text, _last_spoken_time
     clean = text.strip()
     if not clean:
@@ -808,7 +808,7 @@ class AudioEngine:
             os.environ.get('ZMIC_TEST_MODE') == '1'
 
         # Continuous Spectral Noise Reduction (Wiener Filter) & 80Hz Low-Cut
-        self.spectral_noise_enabled = False # Default OFF, toggleable via Alt+N
+        self.spectral_noise_enabled = False # Default OFF, toggleable via Ctrl+Alt+N
         # The rumble cut has its own switch, so the voice can be compared with it on and off.
         self.rumble_enabled = True
         self.noise_reduction_level = 40     # 40% default balanced suppression
@@ -2132,7 +2132,7 @@ class TermsWizard(wx.Dialog):
         self.chk_agree.Bind(wx.EVT_CHECKBOX, self.on_toggle_agree)
         sizer.Add(self.chk_agree, 0, wx.ALL, 14)
 
-        self.btn_continue = wx.Button(self, wx.ID_OK, "&Continue to Z Mic Studio")
+        self.btn_continue = wx.Button(self, wx.ID_OK, "Continue to Z Mic Studio")
         self.btn_continue.SetName("Continue to Z Mic Studio")
         self.btn_continue.Enable(False)  # disabled until the box is ticked
         self.btn_continue.Bind(wx.EVT_BUTTON, self.on_continue)
@@ -2195,7 +2195,7 @@ class TermsViewer(wx.Dialog):
         self.txt.SetFocus()
         sizer.Add(self.txt, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 12)
 
-        btn_close = wx.Button(self, wx.ID_CANCEL, "&Close")
+        btn_close = wx.Button(self, wx.ID_CANCEL, "Close")
         btn_close.SetName("Close Terms and Privacy")
         sizer.Add(btn_close, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
 
@@ -2259,13 +2259,13 @@ class VirtualCableRequiredGate(wx.Dialog):
 
         btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.btn_download = wx.Button(self, wx.ID_ANY, "&Download Virtual Cable")
+        self.btn_download = wx.Button(self, wx.ID_ANY, "Download Virtual Cable")
         self.btn_download.SetName("Download Virtual Cable. Opens the official VB-Audio website in your default browser.")
         self.btn_download.SetDefault()
         self.btn_download.Bind(wx.EVT_BUTTON, self.on_download)
         btn_sizer.Add(self.btn_download, 0, wx.RIGHT, 10)
 
-        self.btn_exit = wx.Button(self, wx.ID_CANCEL, "&Exit")
+        self.btn_exit = wx.Button(self, wx.ID_CANCEL, "Exit")
         self.btn_exit.SetName("Exit Z Mic Studio")
         self.btn_exit.Bind(wx.EVT_BUTTON, self.on_exit)
         btn_sizer.Add(self.btn_exit, 0, 0)
@@ -2380,32 +2380,35 @@ class ZMicStudioFrame(wx.Frame):
         self.id_tab_devices = wx.NewIdRef()
         self.id_tab_effects = wx.NewIdRef()
         self.id_tab_help = wx.NewIdRef()
+        self.id_tab_about_page = wx.NewIdRef()
         self.id_tab_next = wx.NewIdRef()
         self.id_tab_prev = wx.NewIdRef()
 
+        ca = wx.ACCEL_CTRL | wx.ACCEL_ALT
         entries = [
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('R'), self.id_hotkey_stream.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('r'), self.id_hotkey_stream.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('M'), self.id_hotkey_mute.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('m'), self.id_hotkey_mute.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('I'), self.id_hotkey_input.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('i'), self.id_hotkey_input.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('N'), self.id_hotkey_noise.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('n'), self.id_hotkey_noise.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('B'), self.id_hotkey_rumble.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('b'), self.id_hotkey_rumble.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('E'), self.id_hotkey_echo.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('e'), self.id_hotkey_echo.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('P'), self.id_hotkey_pingpong.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('p'), self.id_hotkey_pingpong.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('H'), self.id_hotkey_monitor.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('h'), self.id_hotkey_monitor.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('A'), self.id_hotkey_about.GetId()),
-            wx.AcceleratorEntry(wx.ACCEL_ALT, ord('a'), self.id_hotkey_about.GetId()),
+            wx.AcceleratorEntry(ca, ord('R'), self.id_hotkey_stream.GetId()),
+            wx.AcceleratorEntry(ca, ord('r'), self.id_hotkey_stream.GetId()),
+            wx.AcceleratorEntry(ca, ord('M'), self.id_hotkey_mute.GetId()),
+            wx.AcceleratorEntry(ca, ord('m'), self.id_hotkey_mute.GetId()),
+            wx.AcceleratorEntry(ca, ord('I'), self.id_hotkey_input.GetId()),
+            wx.AcceleratorEntry(ca, ord('i'), self.id_hotkey_input.GetId()),
+            wx.AcceleratorEntry(ca, ord('N'), self.id_hotkey_noise.GetId()),
+            wx.AcceleratorEntry(ca, ord('n'), self.id_hotkey_noise.GetId()),
+            wx.AcceleratorEntry(ca, ord('B'), self.id_hotkey_rumble.GetId()),
+            wx.AcceleratorEntry(ca, ord('b'), self.id_hotkey_rumble.GetId()),
+            wx.AcceleratorEntry(ca, ord('E'), self.id_hotkey_echo.GetId()),
+            wx.AcceleratorEntry(ca, ord('e'), self.id_hotkey_echo.GetId()),
+            wx.AcceleratorEntry(ca, ord('P'), self.id_hotkey_pingpong.GetId()),
+            wx.AcceleratorEntry(ca, ord('p'), self.id_hotkey_pingpong.GetId()),
+            wx.AcceleratorEntry(ca, ord('H'), self.id_hotkey_monitor.GetId()),
+            wx.AcceleratorEntry(ca, ord('h'), self.id_hotkey_monitor.GetId()),
+            wx.AcceleratorEntry(ca, ord('A'), self.id_hotkey_about.GetId()),
+            wx.AcceleratorEntry(ca, ord('a'), self.id_hotkey_about.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_CTRL, ord('1'), self.id_tab_stream.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_CTRL, ord('2'), self.id_tab_devices.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_CTRL, ord('3'), self.id_tab_effects.GetId()),
             wx.AcceleratorEntry(wx.ACCEL_CTRL, ord('4'), self.id_tab_help.GetId()),
+            wx.AcceleratorEntry(wx.ACCEL_CTRL, ord('5'), self.id_tab_about_page.GetId()),
             # Ctrl+Tab moves to the next tab. Registered explicitly because wx.Notebook does not
             # provide it reliably, and the Help tab documents it.
             wx.AcceleratorEntry(wx.ACCEL_CTRL, wx.WXK_TAB, self.id_tab_next.GetId()),
@@ -2426,6 +2429,7 @@ class ZMicStudioFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda e: self.notebook.SetSelection(1), id=self.id_tab_devices.GetId())
         self.Bind(wx.EVT_MENU, lambda e: self.notebook.SetSelection(2), id=self.id_tab_effects.GetId())
         self.Bind(wx.EVT_MENU, lambda e: self.notebook.SetSelection(3), id=self.id_tab_help.GetId())
+        self.Bind(wx.EVT_MENU, lambda e: self.notebook.SetSelection(4), id=self.id_tab_about_page.GetId())
         self.Bind(wx.EVT_MENU, self.on_next_tab, id=self.id_tab_next.GetId())
         self.Bind(wx.EVT_MENU, self.on_previous_tab, id=self.id_tab_prev.GetId())
 
@@ -2494,8 +2498,8 @@ class ZMicStudioFrame(wx.Frame):
         Used when the engine is not running, so the buttons and the status line always
         match what the engine is actually doing.
         """
-        self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
-        self.btn_stream.SetName("Start Audio Stream (Alt+R)")
+        self.btn_stream.SetLabel("Start Audio Stream (Ctrl+Alt+R)")
+        self.btn_stream.SetName("Start Audio Stream (Ctrl+Alt+R)")
         self.btn_mute.Disable()
         if reason:
             self.lbl_status.SetLabel(f"Status: {reason}")
@@ -2522,11 +2526,11 @@ class ZMicStudioFrame(wx.Frame):
         self.tab_help = self._create_help_tab(self.notebook)
         self.tab_about = self._create_about_tab(self.notebook)
 
-        self.notebook.AddPage(self.tab_stream, "&Stream")
-        self.notebook.AddPage(self.tab_devices, "&Devices")
-        self.notebook.AddPage(self.tab_effects, "Audio &Effects")
-        self.notebook.AddPage(self.tab_help, "&Help and Shortcuts")
-        self.notebook.AddPage(self.tab_about, "A&bout")
+        self.notebook.AddPage(self.tab_stream, "Stream")
+        self.notebook.AddPage(self.tab_devices, "Devices")
+        self.notebook.AddPage(self.tab_effects, "Audio Effects")
+        self.notebook.AddPage(self.tab_help, "Help and Shortcuts")
+        self.notebook.AddPage(self.tab_about, "About")
 
         main_sizer.Add(self.notebook, 1, wx.EXPAND | wx.ALL, 10)
         panel.SetSizer(main_sizer)
@@ -2551,9 +2555,9 @@ class ZMicStudioFrame(wx.Frame):
 
         # 2. Main actions
         btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.btn_stream = wx.Button(page, wx.ID_ANY, "Start Audio Stream (Alt+&R)")
-        self.btn_stream.SetName("Start Audio Stream (Alt+R)")
-        self.btn_mute = wx.Button(page, wx.ID_ANY, "Mute Microphone (Ctrl+Alt+&M)")
+        self.btn_stream = wx.Button(page, wx.ID_ANY, "Start Audio Stream (Ctrl+Alt+R)")
+        self.btn_stream.SetName("Start Audio Stream (Ctrl+Alt+R)")
+        self.btn_mute = wx.Button(page, wx.ID_ANY, "Mute Microphone (Ctrl+Alt+M)")
         self.btn_mute.SetName("Mute Microphone (Ctrl+Alt+M)")
         self.btn_mute.Disable()
 
@@ -2636,11 +2640,11 @@ class ZMicStudioFrame(wx.Frame):
 
         # Action Buttons for Discovered Phones
         dev_btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.btn_connect_phone = wx.Button(page, wx.ID_ANY, "Connect Phone (&Enter)")
+        self.btn_connect_phone = wx.Button(page, wx.ID_ANY, "Connect Phone (Enter)")
         self.btn_connect_phone.SetName("Connect Phone (Enter)")
-        self.btn_disconnect_phone = wx.Button(page, wx.ID_ANY, "&Disconnect Phone")
+        self.btn_disconnect_phone = wx.Button(page, wx.ID_ANY, "Disconnect Phone")
         self.btn_disconnect_phone.SetName("Disconnect Phone")
-        self.btn_forget_phone = wx.Button(page, wx.ID_ANY, "&Forget Device")
+        self.btn_forget_phone = wx.Button(page, wx.ID_ANY, "Forget Device")
         self.btn_forget_phone.SetName("Forget Device")
 
         self.btn_connect_phone.Disable()
@@ -2663,10 +2667,10 @@ class ZMicStudioFrame(wx.Frame):
         lbl_dev_head.SetFont(lbl_dev_head.GetFont().Bold())
         sizer.Add(lbl_dev_head, 0, wx.LEFT | wx.TOP, 6)
 
-        # Microphone Input Source Selector (Alt+I)
-        sizer.Add(wx.StaticText(page, wx.ID_ANY, "Audio Input Device (Microphone) (Alt+&I):"), 0, wx.LEFT | wx.TOP, 6)
+        # Microphone Input Source Selector (Ctrl+Alt+I)
+        sizer.Add(wx.StaticText(page, wx.ID_ANY, "Audio Input Device (Microphone) (Ctrl+Alt+I):"), 0, wx.LEFT | wx.TOP, 6)
         self.cmb_input_source = wx.Choice(page, wx.ID_ANY, choices=[])
-        self.cmb_input_source.SetName("Audio Input Device (Microphone) (Alt+I)")
+        self.cmb_input_source.SetName("Audio Input Device (Microphone) (Ctrl+Alt+I)")
         self.cmb_input_source.Bind(wx.EVT_CHOICE, self.on_input_source_changed)
         sizer.Add(self.cmb_input_source, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
 
@@ -2708,14 +2712,14 @@ class ZMicStudioFrame(wx.Frame):
         sizer = wx.BoxSizer(wx.VERTICAL)
 
         # -------------------------------------------------------------
-        # Section 1: Continuous Noise Reduction & Clean Filter (Alt+N)
+        # Section 1: Continuous Noise Reduction & Clean Filter (Ctrl+Alt+N)
         # -------------------------------------------------------------
         lbl_noise_head = wx.StaticText(page, wx.ID_ANY, "Continuous Noise Reduction & Clean Filter:")
         lbl_noise_head.SetFont(lbl_noise_head.GetFont().Bold())
         sizer.Add(lbl_noise_head, 0, wx.LEFT | wx.TOP, 6)
 
-        self.chk_spectral_noise = wx.CheckBox(page, wx.ID_ANY, "Enable Continuous Noise Reduction (Alt+&N)")
-        self.chk_spectral_noise.SetName("Enable Continuous Noise Reduction (Alt+N)")
+        self.chk_spectral_noise = wx.CheckBox(page, wx.ID_ANY, "Enable Continuous Noise Reduction (Ctrl+Alt+N)")
+        self.chk_spectral_noise.SetName("Enable Continuous Noise Reduction (Ctrl+Alt+N)")
         self.chk_spectral_noise.SetValue(False)
         self.chk_spectral_noise.Bind(wx.EVT_CHECKBOX, self.on_spectral_noise_changed)
         sizer.Add(self.chk_spectral_noise, 0, wx.LEFT | wx.TOP | wx.BOTTOM, 4)
@@ -2731,8 +2735,8 @@ class ZMicStudioFrame(wx.Frame):
 
         # The rumble cut gets its own switch so the voice can be compared with it on and off,
         # which is the only honest way to judge a filter change by ear.
-        self.chk_rumble_cut = wx.CheckBox(page, wx.ID_ANY, "Cut Rumble Below 80Hz (Alt+&B)")
-        self.chk_rumble_cut.SetName("Cut Rumble Below 80Hz, Alt+B")
+        self.chk_rumble_cut = wx.CheckBox(page, wx.ID_ANY, "Cut Rumble Below 80Hz (Ctrl+Alt+B)")
+        self.chk_rumble_cut.SetName("Cut Rumble Below 80Hz (Ctrl+Alt+B)")
         self.chk_rumble_cut.SetValue(True)
         self.chk_rumble_cut.SetToolTip(
             "Removes low fan hum, air conditioning rumble and handling noise.\n"
@@ -2815,13 +2819,13 @@ class ZMicStudioFrame(wx.Frame):
         lbl_echo_head.SetFont(lbl_echo_head.GetFont().Bold())
         sizer.Add(lbl_echo_head, 0, wx.LEFT | wx.TOP, 6)
 
-        self.chk_echo = wx.CheckBox(page, wx.ID_ANY, "Enable Studio Echo (Alt+&E)")
-        self.chk_echo.SetName("Enable Studio Echo (Alt+E)")
+        self.chk_echo = wx.CheckBox(page, wx.ID_ANY, "Enable Studio Echo (Ctrl+Alt+E)")
+        self.chk_echo.SetName("Enable Studio Echo (Ctrl+Alt+E)")
         self.chk_echo.Bind(wx.EVT_CHECKBOX, self.on_echo_changed)
         sizer.Add(self.chk_echo, 0, wx.LEFT | wx.TOP | wx.BOTTOM, 3)
 
-        self.chk_pingpong = wx.CheckBox(page, wx.ID_ANY, "Ping-Pong Stereo Bounce (Alt+&P)")
-        self.chk_pingpong.SetName("Ping-Pong Stereo Bounce (Alt+P)")
+        self.chk_pingpong = wx.CheckBox(page, wx.ID_ANY, "Ping-Pong Stereo Bounce (Ctrl+Alt+P)")
+        self.chk_pingpong.SetName("Ping-Pong Stereo Bounce (Ctrl+Alt+P)")
         self.chk_pingpong.Bind(wx.EVT_CHECKBOX, self.on_pingpong_changed)
         sizer.Add(self.chk_pingpong, 0, wx.LEFT | wx.BOTTOM, 4)
 
@@ -2848,8 +2852,8 @@ class ZMicStudioFrame(wx.Frame):
         # -------------------------------------------------------------
         # Section 4: Hear Myself in Headphones (Monitoring)
         # -------------------------------------------------------------
-        self.chk_monitor = wx.CheckBox(page, wx.ID_ANY, "Hear Myself in Headphones (Alt+&H)")
-        self.chk_monitor.SetName("Hear Myself in Headphones (Alt+H)")
+        self.chk_monitor = wx.CheckBox(page, wx.ID_ANY, "Hear Myself in Headphones (Ctrl+Alt+H)")
+        self.chk_monitor.SetName("Hear Myself in Headphones (Ctrl+Alt+H)")
         self.chk_monitor.Bind(wx.EVT_CHECKBOX, self.on_monitor_changed)
         sizer.Add(self.chk_monitor, 0, wx.ALL, 6)
 
@@ -2887,12 +2891,12 @@ class ZMicStudioFrame(wx.Frame):
                 "Created and designed by Zameer.\n\n"
                 "Z Mic Studio turns your Android phone into a studio-grade microphone "
                 "for your Windows computer, over your local Wi-Fi network.\n\n"
-                "ACCESSIBILITY\n\n"
-                "This app was built screen-reader first. It works with NVDA on Windows "
-                "and TalkBack on Android.\n\n"
+                "FEATURES\n\n"
+                "Real-time DSP audio effects, low-latency streaming, global hotkeys, "
+                "and full keyboard navigation.\n\n"
                 "FEEDBACK AND SUPPORT\n\n"
-                "Email: zameer.sstr@gmail.com\n\n"
-                "Open your email app and write that address there yourself.\n\n"
+                "For questions, feedback, or bug reports, please open an issue on GitHub:\n"
+                "https://github.com/zameersts/Z-Mic-Studio/issues\n\n"
                 "This app cannot send anything by itself. Nothing about you or your "
                 "computer is sent anywhere."
             ),
@@ -2907,12 +2911,12 @@ class ZMicStudioFrame(wx.Frame):
         # Terms stay reachable from here too, so a user who came for the version has
         # not to go back to another tab to read them.
         btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.btn_about_terms = wx.Button(page, wx.ID_ANY, "View &Terms and Privacy")
+        self.btn_about_terms = wx.Button(page, wx.ID_ANY, "View Terms and Privacy")
         self.btn_about_terms.SetName("View Terms and Privacy")
         self._make_button_accessible(self.btn_about_terms, self.on_view_terms)
         btn_sizer.Add(self.btn_about_terms, 0)
 
-        self.btn_about_help = wx.Button(page, wx.ID_ANY, "Go to &Help")
+        self.btn_about_help = wx.Button(page, wx.ID_ANY, "Go to Help")
         self.btn_about_help.SetName("Go to the Help tab")
         self.btn_about_help.Bind(wx.EVT_BUTTON, self.on_go_to_help_tab)
         btn_sizer.Add(self.btn_about_help, 0, wx.LEFT, 10)
@@ -2939,12 +2943,12 @@ class ZMicStudioFrame(wx.Frame):
         sizer.Add(self.lbl_update_status, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
 
         btn_row = wx.BoxSizer(wx.HORIZONTAL)
-        self.btn_check_updates = wx.Button(page, wx.ID_ANY, "&Check for Updates")
+        self.btn_check_updates = wx.Button(page, wx.ID_ANY, "Check for Updates")
         self.btn_check_updates.SetName("Check for updates")
         self.btn_check_updates.Bind(wx.EVT_BUTTON, self.on_check_updates)
         btn_row.Add(self.btn_check_updates, 0)
 
-        self.btn_firewall = wx.Button(page, wx.ID_ANY, "&Windows Firewall")
+        self.btn_firewall = wx.Button(page, wx.ID_ANY, "Windows Firewall")
         self.btn_firewall.SetName("Windows Firewall permission, repair or remove")
         self.btn_firewall.Bind(wx.EVT_BUTTON, self.on_firewall_repair)
         btn_row.Add(self.btn_firewall, 0, wx.LEFT, 10)
@@ -3251,16 +3255,18 @@ class ZMicStudioFrame(wx.Frame):
                 "Ctrl plus 2 goes to the Devices tab.\n"
                 "Ctrl plus 3 goes to the Audio Effects tab.\n"
                 "Ctrl plus 4 goes to the Help tab.\n"
+                "Ctrl plus 5 goes to the About tab.\n"
                 "\n"
-                "Main actions. These work from any tab.\n"
-                "Alt plus R starts or stops the audio stream.\n"
-                "Alt plus M mutes or unmutes the microphone.\n"
-                "Alt plus I goes to the audio input selector.\n"
-                "Alt plus N turns noise reduction on or off.\n"
-                "Alt plus E turns studio echo on or off.\n"
-                "Alt plus P turns ping pong delay on or off.\n"
-                "Alt plus H turns headphone monitoring on or off.\n"
-                "Alt plus A opens the About window.\n"
+                "Actions. Hold Ctrl and Alt together with the letter.\n"
+                "Ctrl plus Alt plus R starts or stops the audio stream.\n"
+                "Ctrl plus Alt plus M mutes or unmutes the microphone.\n"
+                "Ctrl plus Alt plus I goes to the audio input selector.\n"
+                "Ctrl plus Alt plus N turns noise reduction on or off.\n"
+                "Ctrl plus Alt plus B turns rumble cut on or off.\n"
+                "Ctrl plus Alt plus E turns studio echo on or off.\n"
+                "Ctrl plus Alt plus P turns ping pong delay on or off.\n"
+                "Ctrl plus Alt plus H turns headphone monitoring on or off.\n"
+                "Ctrl plus Alt plus A opens the About window.\n"
                 "\n"
                 "Global shortcut.\n"
                 "Ctrl plus Alt plus M mutes or unmutes the microphone from\n"
@@ -3302,8 +3308,7 @@ class ZMicStudioFrame(wx.Frame):
                 "\n"
                 "Z Mic Studio turns your phone into a microphone for your computer.\n"
                 "\n"
-                "It is made to work with screen readers such as NVDA, JAWS and\n"
-                "Windows Narrator, and with Google TalkBack on Android."
+                "Features low-latency audio streaming, DSP effects, and full keyboard navigation."
             ),
         ]
 
@@ -3337,12 +3342,12 @@ class ZMicStudioFrame(wx.Frame):
         # Previous / Next let a screen reader user step through one topic at a time.
         nav_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.btn_help_prev = wx.Button(page, wx.ID_ANY, "&Previous Topic")
+        self.btn_help_prev = wx.Button(page, wx.ID_ANY, "Previous Topic")
         self.btn_help_prev.SetName("Previous Help Topic")
         self.btn_help_prev.Bind(wx.EVT_BUTTON, self.on_help_prev)
         nav_sizer.Add(self.btn_help_prev, 0, wx.RIGHT, 10)
 
-        self.btn_help_next = wx.Button(page, wx.ID_ANY, "&Next Topic")
+        self.btn_help_next = wx.Button(page, wx.ID_ANY, "Next Topic")
         self.btn_help_next.SetName("Next Help Topic")
         self.btn_help_next.Bind(wx.EVT_BUTTON, self.on_help_next)
         nav_sizer.Add(self.btn_help_next, 0, wx.RIGHT, 10)
@@ -3352,7 +3357,7 @@ class ZMicStudioFrame(wx.Frame):
         btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         # Terms: always reachable, not only on the first run.
-        self.btn_view_terms = wx.Button(page, wx.ID_ANY, "View &Terms and Privacy")
+        self.btn_view_terms = wx.Button(page, wx.ID_ANY, "View Terms and Privacy")
         self.btn_view_terms.SetName("View Terms and Privacy")
         self._make_button_accessible(self.btn_view_terms, self.on_view_terms)
         btn_sizer.Add(self.btn_view_terms, 0, wx.RIGHT, 10)
@@ -3363,7 +3368,7 @@ class ZMicStudioFrame(wx.Frame):
 
         # The log is only needed when something is not working, so it is offered as a
         # troubleshooting aid rather than as a general feature.
-        self.btn_open_log = wx.Button(page, wx.ID_ANY, "Open &Troubleshooting Log")
+        self.btn_open_log = wx.Button(page, wx.ID_ANY, "Open Troubleshooting Log")
         self.btn_open_log.SetName("Open Troubleshooting Log")
         self.btn_open_log.SetToolTip(f"Opens the Z Mic Studio diagnostic log:\n{LOG_FILE}")
         self._make_button_accessible(self.btn_open_log, self.on_open_log)
@@ -3641,8 +3646,8 @@ class ZMicStudioFrame(wx.Frame):
             # disconnected.
             if self.engine.input_mode == "phone":
                 self.engine.stop()
-                self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
-                self.btn_stream.SetName("Start Audio Stream (Alt+R)")
+                self.btn_stream.SetLabel("Start Audio Stream (Ctrl+Alt+R)")
+                self.btn_stream.SetName("Start Audio Stream (Ctrl+Alt+R)")
                 self.btn_mute.Disable()
             else:
                 self.engine.release_phone_link()
@@ -3668,8 +3673,8 @@ class ZMicStudioFrame(wx.Frame):
         self.discovery.forget_device(ip)
         if self.engine.is_running:
             self.engine.stop()
-            self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
-            self.btn_stream.SetName("Start Audio Stream (Alt+R)")
+            self.btn_stream.SetLabel("Start Audio Stream (Ctrl+Alt+R)")
+            self.btn_stream.SetName("Start Audio Stream (Ctrl+Alt+R)")
             self.btn_mute.Disable()
         self.lbl_status.SetLabel(f"Status: Forgot device {name}")
         notify_event("phone_forgotten", f"Device {name} forgotten", 400, 200)
@@ -3776,8 +3781,8 @@ class ZMicStudioFrame(wx.Frame):
                 ok, msg = self.engine.start(port, self.target_cable_id)
 
             if ok:
-                self.btn_stream.SetLabel("Stop Audio Stream (Alt+&R)")
-                self.btn_stream.SetName("Stop Audio Stream (Alt+R)")
+                self.btn_stream.SetLabel("Stop Audio Stream (Ctrl+Alt+R)")
+                self.btn_stream.SetName("Stop Audio Stream (Ctrl+Alt+R)")
                 self.btn_mute.Enable()
                 # Set the label only after the engine has started, otherwise start()'s own
                 # status callback overwrites it and the user never sees the confirmation.
@@ -3920,8 +3925,8 @@ class ZMicStudioFrame(wx.Frame):
 
             ok, msg = self.engine.start(PORT_DEFAULT, self.target_cable_id)
             if ok:
-                self.btn_stream.SetLabel("Stop Audio Stream (Alt+&R)")
-                self.btn_stream.SetName("Stop Audio Stream (Alt+R)")
+                self.btn_stream.SetLabel("Stop Audio Stream (Ctrl+Alt+R)")
+                self.btn_stream.SetName("Stop Audio Stream (Ctrl+Alt+R)")
                 self.btn_mute.Enable()
 
                 # Starting a phone stream also asks the phone to begin sending. The
@@ -3937,16 +3942,16 @@ class ZMicStudioFrame(wx.Frame):
                 notify_event("stream_started", f"Streaming started. Capturing from {src_label}.",
                              1000, 150)
             else:
-                self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
-                self.btn_stream.SetName("Start Audio Stream (Alt+R)")
+                self.btn_stream.SetLabel("Start Audio Stream (Ctrl+Alt+R)")
+                self.btn_stream.SetName("Start Audio Stream (Ctrl+Alt+R)")
                 self.btn_mute.Disable()
                 self.lbl_status.SetLabel(f"Status Error: {msg}")
                 play_audio_cue(400, 250)
                 speak_accessibility(f"Stream error: {msg}")
         else:
             self.engine.stop()
-            self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
-            self.btn_stream.SetName("Start Audio Stream (Alt+R)")
+            self.btn_stream.SetLabel("Start Audio Stream (Ctrl+Alt+R)")
+            self.btn_stream.SetName("Start Audio Stream (Ctrl+Alt+R)")
             self.btn_mute.Disable()
             self.lbl_status.SetLabel("Status: Stopped")
             # Likewise not "phone_disconnected", for the same reason.
@@ -3955,12 +3960,12 @@ class ZMicStudioFrame(wx.Frame):
     def _apply_mute_ui(self, muted):
         """Single source of truth for the mute button label, status line and audio cue."""
         if muted:
-            self.btn_mute.SetLabel("Unmute Microphone (Ctrl+Alt+&M)")
+            self.btn_mute.SetLabel("Unmute Microphone (Ctrl+Alt+M)")
             self.btn_mute.SetName("Unmute Microphone (Ctrl+Alt+M)")
             self.lbl_status.SetLabel("Status: Microphone OFF (Muted)")
             notify_event("mic_muted", "Microphone off", 400, 180)
         else:
-            self.btn_mute.SetLabel("Mute Microphone (Ctrl+Alt+&M)")
+            self.btn_mute.SetLabel("Mute Microphone (Ctrl+Alt+M)")
             self.btn_mute.SetName("Mute Microphone (Ctrl+Alt+M)")
             self.lbl_status.SetLabel("Status: Microphone ON (Active)")
             notify_event("mic_unmuted", "Microphone on", 1000, 150)
@@ -4145,12 +4150,12 @@ class ZMicStudioFrame(wx.Frame):
                 return
             self.lbl_status.SetLabel(f"Status: {message}")
             if state == "Stopped" and self.btn_stream and self.btn_stream.GetLabel().startswith("Stop"):
-                self.btn_stream.SetLabel("Start Audio Stream (Alt+&R)")
-                self.btn_stream.SetName("Start Audio Stream (Alt+R)")
+                self.btn_stream.SetLabel("Start Audio Stream (Ctrl+Alt+R)")
+                self.btn_stream.SetName("Start Audio Stream (Ctrl+Alt+R)")
                 self.btn_mute.Disable()
             elif state in ("Connected", "Listening") and self.btn_stream and self.btn_stream.GetLabel().startswith("Start"):
-                self.btn_stream.SetLabel("Stop Audio Stream (Alt+&R)")
-                self.btn_stream.SetName("Stop Audio Stream (Alt+R)")
+                self.btn_stream.SetLabel("Stop Audio Stream (Ctrl+Alt+R)")
+                self.btn_stream.SetName("Stop Audio Stream (Ctrl+Alt+R)")
                 self.btn_mute.Enable()
         except Exception:
             pass
@@ -4180,16 +4185,15 @@ class ZMicStudioFrame(wx.Frame):
         about_text = (
             f"ZMic Studio {APP_VERSION_DISPLAY}\n\n"
             "Created & Designed by Zameer\n\n"
-            "An accessible, studio-grade virtual microphone system bridging your smartphone\n"
+            "A studio-grade virtual microphone system bridging your smartphone\n"
             "and Windows PC over local Wi-Fi with crystal-clear 48kHz dual-mic stereo sound.\n\n"
-            "Engineered with screen-reader first accessibility for NVDA and Google TalkBack.\n"
             "High-performance DSP with continuous noise reduction and 3D spatial width.\n\n"
             "Feedback and support:\n"
-            "zameer.sstr@gmail.com"
+            "https://github.com/zameersts/Z-Mic-Studio/issues"
         )
         speak_accessibility(
             f"About {APP_NAME}. Version {APP_VERSION_DISPLAY}. Created and Designed by Zameer. "
-            "For feedback or support, email zameer.sstr at gmail dot com."
+            "For feedback or support, visit our GitHub issues page."
         )
         wx.MessageBox(about_text, "About ZMic Studio", wx.OK | wx.ICON_INFORMATION, self)
 

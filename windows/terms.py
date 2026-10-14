@@ -58,9 +58,8 @@ TERMS_SECTIONS = [
         "connections. That permission is needed so audio can arrive from your "
         "phone, and you can remove it at any time from the About section.\n\n"
         "Your settings and log files stay on your computer only.\n\n"
-        "If you want to send feedback or ask for help, you can email " +
-        "zameer.sstr@gmail.com. You have to write that address yourself, " +
-        "because this app cannot send anything by itself."
+        "If you want to send feedback or ask for help, you can open an issue on GitHub at " +
+        "https://github.com/zameersts/Z-Mic-Studio/issues."
     ),
     (
         "Third Party Program",

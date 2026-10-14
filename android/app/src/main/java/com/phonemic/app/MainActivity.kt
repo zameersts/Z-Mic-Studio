@@ -436,26 +436,18 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_about_title)
             .setView(scroll)
-            .setPositiveButton(R.string.btn_email_support) { _, _ -> openEmailSupport() }
+            .setPositiveButton(R.string.btn_support_issues) { _, _ -> openSupportIssues() }
             .setNeutralButton(R.string.btn_check_updates) { _, _ -> AppUpdateChecker.checkForUpdates(this, silent = false) }
             .setNegativeButton(R.string.btn_close, null)
             .show()
     }
 
-    private fun openEmailSupport() {
-        val address = getString(R.string.support_email)
-        val intent = Intent(Intent.ACTION_SENDTO).apply {
-            data = Uri.parse("mailto:$address")
-            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.support_email_subject))
-        }
+    private fun openSupportIssues() {
+        val url = getString(R.string.support_issues_url)
         try {
-            startActivity(intent)
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         } catch (e: Exception) {
-            // No email app installed. Say so plainly instead of failing silently.
-            Log.e(TAG, "Could not open an email app", e)
-            tvStatus.announceForAccessibility(
-                getString(R.string.status_error, getString(R.string.error_no_email_app))
-            )
+            Log.e(TAG, "Could not open browser for support", e)
         }
     }
 
