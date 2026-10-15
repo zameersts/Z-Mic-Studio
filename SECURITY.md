@@ -17,4 +17,4 @@ We take security seriously and will investigate and address reported issues prom
 
 - **Local Network Streaming:** Audio is streamed peer-to-peer over your local Wi-Fi / Ethernet subnet.
 - **No Remote Telemetry:** No user tracking, remote analytics, or recording data is transmitted to the cloud.
-- **Network Encryption Plan:** For public Wi-Fi encryption specifications, see [docs/SECURITY_BUILD_PLAN.md](docs/SECURITY_BUILD_PLAN.md) and [ENCRYPTION_DESIGN.md](ENCRYPTION_DESIGN.md).
+- **Unencrypted Local PCM:** Audio travels as plain PCM over your private local network.

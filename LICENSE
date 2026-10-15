@@ -27,8 +27,7 @@ A note on this app's security, written by the author rather than left out.
 The audio is not encrypted. It travels as plain PCM between the phone and the
 computer, which is fine on a home network you control and is not fine on a
 network you do not. Anyone able to see the traffic between the two devices can
-listen to it. An AES-GCM design is written up in ENCRYPTION_DESIGN.md and not
-yet implemented. Treat this as a reason to keep the app on your own network,
+listen to it. Treat this as a reason to keep the app on your own network,
 not as a finished piece of security work.
 
 The release keystore is not in this repository and must not be. Losing it means no future

@@ -69,8 +69,7 @@ Z Mic Studio only contacts the internet when checking for updates via GitHub's p
 
 **The audio is not encrypted.** It travels as plain PCM between the two devices. On a home
 network you control that is fine. On a network you do not, anyone able to see the traffic can
-listen. This is written down here rather than hidden, and an encryption design exists in
-[ENCRYPTION_DESIGN.md](ENCRYPTION_DESIGN.md) but is not implemented. If that matters to you,
+listen. This is written down here rather than hidden. If that matters to you,
 keep this on your own network.
 
 ## Building it

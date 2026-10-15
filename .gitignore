@@ -53,3 +53,7 @@ Thumbs.db
 # Agent files
 .agents/
 AGENTS.md
+
+# Private development documentation
+private_docs/
+
